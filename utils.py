@@ -143,3 +143,4 @@ def batch_generator(data, time, batch_size):
   T_mb = list(time[i] for i in train_idx)
   
   return X_mb, T_mb
+

@@ -23,6 +23,8 @@ data_loading.py
 ## Necessary Packages
 import numpy as np
 
+from preprocess import get_cz_bank_data
+
 
 def MinMaxScaler(data):
   """Min Max normalizer.
@@ -88,14 +90,18 @@ def real_data_loading (data_name, seq_len):
     - data: preprocessed data.
   """  
   assert data_name in ['stock','energy']
-  
+
   if data_name == 'stock':
-    ori_data = np.loadtxt('data/stock_data.csv', delimiter = ",",skiprows = 1)
+    ori_data = np.loadtxt('data/stock_data.csv', delimiter=",", skiprows=1)
+    # Flip the data to make chronological data
+    ori_data = ori_data[::-1]
   elif data_name == 'energy':
-    ori_data = np.loadtxt('data/energy_data.csv', delimiter = ",",skiprows = 1)
-        
-  # Flip the data to make chronological data
-  ori_data = ori_data[::-1]
+    ori_data = np.loadtxt('data/energy_data.csv', delimiter=",", skiprows=1)
+    # Flip the data to make chronological data
+    ori_data = ori_data[::-1]
+  elif data_name == 'czb':
+    ori_data = get_cz_bank_data(acc_id='A0000002152')
+
   # Normalize the data
   ori_data = MinMaxScaler(ori_data)
     
@@ -111,5 +117,4 @@ def real_data_loading (data_name, seq_len):
   data = []
   for i in range(len(temp_data)):
     data.append(temp_data[idx[i]])
-    
   return data
