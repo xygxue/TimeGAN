@@ -27,10 +27,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-dataset = "czech_bank"
-plot_path = os.path.join(Path(__file__).parent, 'results', dataset, 'plot', '{analysis}_{cur_date}.png')
-
-
 def visualization (ori_data, generated_data, analysis):
   """Using PCA or tSNE for generated and original data visualization.
   
@@ -38,7 +34,10 @@ def visualization (ori_data, generated_data, analysis):
     - ori_data: original data
     - generated_data: generated synthetic data
     - analysis: tsne or pca
-  """  
+  """
+  dataset = "czech_bank"
+  plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'plot', '{analysis}_{cur_date}.png')
+
   # Analysis sample size (for faster computation)
   anal_sample_no = min([1000, len(ori_data)])
   idx = np.random.permutation(len(ori_data))[:anal_sample_no]
@@ -76,7 +75,6 @@ def visualization (ori_data, generated_data, analysis):
     pca_hat_results = pca.transform(prep_data_hat)
     
     # Plotting
-    fig = plt.figure()
     f, ax = plt.subplots(1)    
     plt.scatter(pca_results[:,0], pca_results[:,1],
                 c = colors[:anal_sample_no], alpha = 0.2, label = "Original")
@@ -87,8 +85,9 @@ def visualization (ori_data, generated_data, analysis):
     plt.title('PCA plot')
     plt.xlabel('x-pca')
     plt.ylabel('y_pca')
+    plt.savefig(plot_path.format(analysis=analysis, cur_date=cur_date))
     plt.show()
-    fig.savefig(plot_path.format(analysis, cur_date), dpi=fig.dpi)
+
     
   elif analysis == 'tsne':
     
@@ -96,11 +95,10 @@ def visualization (ori_data, generated_data, analysis):
     prep_data_final = np.concatenate((prep_data, prep_data_hat), axis = 0)
     
     # TSNE anlaysis
-    tsne = TSNE(n_components = 2, verbose = 1, perplexity = 40, n_iter = 300)
+    tsne = TSNE(n_components=2, verbose = 1, perplexity = 40, n_iter = 300)
     tsne_results = tsne.fit_transform(prep_data_final)
       
     # Plotting
-    fig = plt.figure()
     f, ax = plt.subplots(1)
       
     plt.scatter(tsne_results[:anal_sample_no,0], tsne_results[:anal_sample_no,1], 
@@ -113,5 +111,5 @@ def visualization (ori_data, generated_data, analysis):
     plt.title('t-SNE plot')
     plt.xlabel('x-tsne')
     plt.ylabel('y_tsne')
+    plt.savefig(plot_path.format(analysis=analysis, cur_date=cur_date))
     plt.show()
-    fig.savefig(plot_path.format(analysis, cur_date), dpi=fig.dpi)

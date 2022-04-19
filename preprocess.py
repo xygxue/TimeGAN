@@ -19,8 +19,8 @@ def get_cz_bank_data(acc_id=None):
     df = df.set_index('date')
     # for i in df['account_id'].unique():
     #     sing_acc = df.loc[df['account_id'] == i]
-    #     if len(sing_acc) == 50:
-    #         print(i)
+    #     if 200 < len(sing_acc) < 300:
+    #         print(i, len(sing_acc))
     data_raw = df.loc[df['account_id'] == acc_id]
     data_raw = data_raw.drop(columns=['account_id', 'trans_id', 'balance'])
     data_prep = DataPrep(data_raw, categorical=CAT,
@@ -30,8 +30,5 @@ def get_cz_bank_data(acc_id=None):
                          type=PROBLEM,
                          test_ratio=0.2)
     data_onthot = pd.get_dummies(data_prep.df, columns=CAT, drop_first=True).sort_index()
-    df_out = data_onthot.groupby(pd.Grouper(freq='15D')).sum()
+    df_out = data_onthot.groupby(pd.Grouper(freq='14D')).sum()
     return df_out.to_numpy()
-
-
-get_cz_bank_data(acc_id='A0000002152')

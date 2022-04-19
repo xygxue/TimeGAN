@@ -100,7 +100,7 @@ def real_data_loading (data_name, seq_len):
     # Flip the data to make chronological data
     ori_data = ori_data[::-1]
   elif data_name == 'czb':
-    ori_data = get_cz_bank_data(acc_id='A0000002152')
+    ori_data = get_cz_bank_data(acc_id='A0000002970')
 
   # Normalize the data
   ori_data = MinMaxScaler(ori_data)
