@@ -17,12 +17,20 @@ Note: Use PCA or tSNE for generated and original data visualization
 """
 
 # Necessary packages
+import os
+from datetime import date
+from pathlib import Path
+
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import numpy as np
 
-   
+
+dataset = "czech_bank"
+plot_path = os.path.join(Path(__file__).parent, 'results', dataset, 'plot', '{analysis}_{cur_date}.png')
+
+
 def visualization (ori_data, generated_data, analysis):
   """Using PCA or tSNE for generated and original data visualization.
   
@@ -49,14 +57,17 @@ def visualization (ori_data, generated_data, analysis):
       prep_data = np.reshape(np.mean(ori_data[0,:,:], 1), [1,seq_len])
       prep_data_hat = np.reshape(np.mean(generated_data[0,:,:],1), [1,seq_len])
     else:
-      prep_data = np.concatenate((prep_data, 
+      prep_data = np.concatenate((prep_data,
                                   np.reshape(np.mean(ori_data[i,:,:],1), [1,seq_len])))
       prep_data_hat = np.concatenate((prep_data_hat, 
                                       np.reshape(np.mean(generated_data[i,:,:],1), [1,seq_len])))
     
   # Visualization parameter        
-  colors = ["red" for i in range(anal_sample_no)] + ["blue" for i in range(anal_sample_no)]    
-    
+  colors = ["red" for i in range(anal_sample_no)] + ["blue" for i in range(anal_sample_no)]
+
+  today = date.today()
+  cur_date = today.strftime("%Y-%m-%d")
+
   if analysis == 'pca':
     # PCA Analysis
     pca = PCA(n_components = 2)
@@ -65,6 +76,7 @@ def visualization (ori_data, generated_data, analysis):
     pca_hat_results = pca.transform(prep_data_hat)
     
     # Plotting
+    fig = plt.figure()
     f, ax = plt.subplots(1)    
     plt.scatter(pca_results[:,0], pca_results[:,1],
                 c = colors[:anal_sample_no], alpha = 0.2, label = "Original")
@@ -76,6 +88,7 @@ def visualization (ori_data, generated_data, analysis):
     plt.xlabel('x-pca')
     plt.ylabel('y_pca')
     plt.show()
+    fig.savefig(plot_path.format(analysis, cur_date), dpi=fig.dpi)
     
   elif analysis == 'tsne':
     
@@ -87,6 +100,7 @@ def visualization (ori_data, generated_data, analysis):
     tsne_results = tsne.fit_transform(prep_data_final)
       
     # Plotting
+    fig = plt.figure()
     f, ax = plt.subplots(1)
       
     plt.scatter(tsne_results[:anal_sample_no,0], tsne_results[:anal_sample_no,1], 
@@ -99,4 +113,5 @@ def visualization (ori_data, generated_data, analysis):
     plt.title('t-SNE plot')
     plt.xlabel('x-tsne')
     plt.ylabel('y_tsne')
-    plt.show()    
+    plt.show()
+    fig.savefig(plot_path.format(analysis, cur_date), dpi=fig.dpi)

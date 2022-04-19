@@ -19,6 +19,8 @@ Note: Use original data as training set to generater synthetic data (time-series
 # Necessary Packages
 import tensorflow as tf
 import numpy as np
+from tqdm import tqdm
+
 from utils import extract_time, rnn_cell, random_generator, batch_generator
 
 
@@ -211,7 +213,7 @@ def timegan (ori_data, parameters):
   # Embedder network loss
   E_loss_T0 = tf.losses.mean_squared_error(X, X_tilde)
   E_loss0 = 10*tf.sqrt(E_loss_T0)
-  E_loss = E_loss0  + 0.1*G_loss_S
+  E_loss = E_loss0 + 0.1*G_loss_S
     
   # optimizer
   E0_solver = tf.train.AdamOptimizer().minimize(E_loss0, var_list = e_vars + r_vars)
@@ -220,14 +222,14 @@ def timegan (ori_data, parameters):
   G_solver = tf.train.AdamOptimizer().minimize(G_loss, var_list = g_vars + s_vars)      
   GS_solver = tf.train.AdamOptimizer().minimize(G_loss_S, var_list = g_vars + s_vars)   
         
-  ## TimeGAN training   
+  ## TimeGAN training
   sess = tf.Session()
   sess.run(tf.global_variables_initializer())
     
   # 1. Embedding network training
   print('Start Embedding Network Training')
     
-  for itt in range(iterations):
+  for itt in tqdm(range(iterations)):
     # Set mini-batch
     X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)           
     # Train embedder        
@@ -241,7 +243,7 @@ def timegan (ori_data, parameters):
   # 2. Training only with supervised loss
   print('Start Training with Supervised Loss Only')
     
-  for itt in range(iterations):
+  for itt in tqdm(range(iterations)):
     # Set mini-batch
     X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)    
     # Random vector generation   
@@ -250,14 +252,14 @@ def timegan (ori_data, parameters):
     _, step_g_loss_s = sess.run([GS_solver, G_loss_S], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})       
     # Checkpoint
     if itt % 1000 == 0:
-      print('step: '+ str(itt)  + '/' + str(iterations) +', s_loss: ' + str(np.round(np.sqrt(step_g_loss_s),4)) )
+      print('step: ' + str(itt) + '/' + str(iterations) + ', s_loss: ' + str(np.round(np.sqrt(step_g_loss_s), 4)))
       
   print('Finish Training with Supervised Loss Only')
     
   # 3. Joint Training
   print('Start Joint Training')
   
-  for itt in range(iterations):
+  for itt in tqdm(range(iterations)):
     # Generator training (twice more than discriminator training)
     for kk in range(2):
       # Set mini-batch

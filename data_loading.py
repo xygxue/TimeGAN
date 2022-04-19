@@ -89,7 +89,7 @@ def real_data_loading (data_name, seq_len):
   Returns:
     - data: preprocessed data.
   """  
-  assert data_name in ['stock','energy']
+  assert data_name in ['stock','energy', 'czb']
 
   if data_name == 'stock':
     ori_data = np.loadtxt('data/stock_data.csv', delimiter=",", skiprows=1)
