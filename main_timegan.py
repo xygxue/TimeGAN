@@ -139,7 +139,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--module',
         choices=['gru', 'lstm', 'lstmLN'],
-        default='gru',
+        default='lstmLN',
         type=str)
     parser.add_argument(
         '--hidden_dim',
