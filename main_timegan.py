@@ -30,7 +30,7 @@ import argparse
 import csv
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -45,9 +45,9 @@ from data_loading import real_data_loading, sine_data_generation
 # 3. Metrics
 from metrics.discriminative_metrics import discriminative_score_metrics
 from metrics.predictive_metrics import predictive_score_metrics
-from metrics.visualization_metrics import visualization
+from metrics.visualization_metrics import visualization, fake_real_plot
 
-dataset = "czech_bank"
+dataset = "czb"
 real_path = os.path.join(Path(__file__).parent, 'data', dataset, 'timegan_real_{cur_date}.csv')
 fake_path = os.path.join(Path(__file__).parent, 'data', dataset, 'timegan_fake_{cur_date}.csv')
 result_path = os.path.join(Path(__file__).parent, 'results', dataset, 'numeric', '{cur_date}.json')
@@ -73,7 +73,7 @@ def main(args):
   """
     # Data loading
     if args.data_name in ['stock', 'energy', 'czb']:
-        ori_data = real_data_loading(args.data_name, args.seq_len)
+        ori_data, labels = real_data_loading(args.data_name, args.seq_len)
     elif args.data_name == 'sine':
         # Set number of samples and its dimensions
         no, dim = 10000, 5
@@ -89,6 +89,7 @@ def main(args):
     parameters['num_layer'] = args.num_layer
     parameters['iterations'] = args.iteration
     parameters['batch_size'] = args.batch_size
+    parameters['data_name'] = args.data_name
 
     generated_data = timegan(ori_data, parameters)
     print('Finish Synthetic Data Generation')
@@ -114,8 +115,8 @@ def main(args):
     metric_results['predictive'] = np.mean(predictive_score)
 
     # 3. Visualization (PCA and tSNE)
-    visualization(ori_data, generated_data, 'pca')
-    visualization(ori_data, generated_data, 'tsne')
+    visualization(ori_data, generated_data, 'pca', args.data_name, labels)
+    visualization(ori_data, generated_data, 'tsne', args.data_name)
 
     ## Print discriminative and predictive scores
     print(metric_results)
@@ -139,12 +140,12 @@ if __name__ == '__main__':
     parser.add_argument(
         '--module',
         choices=['gru', 'lstm', 'lstmLN'],
-        default='lstmLN',
+        default='gru',
         type=str)
     parser.add_argument(
         '--hidden_dim',
         help='hidden state dimensions (should be optimized)',
-        default=24,
+        default=12,
         type=int)
     parser.add_argument(
         '--num_layer',
@@ -154,12 +155,12 @@ if __name__ == '__main__':
     parser.add_argument(
         '--iteration',
         help='Training iterations (should be optimized)',
-        default=50000,
+        default=10000,
         type=int)
     parser.add_argument(
         '--batch_size',
         help='the number of samples in mini-batch (should be optimized)',
-        default=5,
+        default=32,
         type=int)
     parser.add_argument(
         '--metric_iteration',
@@ -172,8 +173,8 @@ if __name__ == '__main__':
     # Calls main function
     ori_data, generated_data, metrics = main(args)
 
-    today = date.today()
-    cur_date = today.strftime("%Y-%m-%d")
+    now = datetime.now()
+    cur_date = now.strftime("%Y-%m-%d-%H")
 
     with open(real_path.format(cur_date=cur_date), 'w') as f:
         write = csv.writer(f)

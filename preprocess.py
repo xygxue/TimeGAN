@@ -31,4 +31,5 @@ def get_cz_bank_data(acc_id=None):
                          test_ratio=0.2)
     data_onthot = pd.get_dummies(data_prep.df, columns=CAT, drop_first=True).sort_index()
     df_out = data_onthot.groupby(pd.Grouper(freq='14D')).sum()
-    return df_out.to_numpy()
+    labels = df_out.columns
+    return df_out.to_numpy(), labels

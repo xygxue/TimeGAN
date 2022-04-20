@@ -21,6 +21,7 @@ import tensorflow as tf
 import numpy as np
 from tqdm import tqdm
 
+from metrics.visualization_metrics import loss_plot
 from utils import extract_time, rnn_cell, random_generator, batch_generator
 
 
@@ -258,7 +259,12 @@ def timegan (ori_data, parameters):
     
   # 3. Joint Training
   print('Start Joint Training')
-  
+
+  d_loss = []
+  g_loss_u = []
+  g_loss_s = []
+  g_loss_v = []
+  e_loss_t0 = []
   for itt in tqdm(range(iterations)):
     # Generator training (twice more than discriminator training)
     for kk in range(2):
@@ -269,8 +275,12 @@ def timegan (ori_data, parameters):
       # Train generator
       _, step_g_loss_u, step_g_loss_s, step_g_loss_v = sess.run([G_solver, G_loss_U, G_loss_S, G_loss_V], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})
        # Train embedder        
-      _, step_e_loss_t0 = sess.run([E_solver, E_loss_T0], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})   
-           
+      _, step_e_loss_t0 = sess.run([E_solver, E_loss_T0], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})
+      g_loss_u.append(step_g_loss_u)
+      g_loss_s.append(step_g_loss_s)
+      g_loss_v.append(step_g_loss_v)
+      e_loss_t0.append(step_e_loss_t0)
+
     # Discriminator training        
     # Set mini-batch
     X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)           
@@ -278,10 +288,12 @@ def timegan (ori_data, parameters):
     Z_mb = random_generator(batch_size, z_dim, T_mb, max_seq_len)
     # Check discriminator loss before updating
     check_d_loss = sess.run(D_loss, feed_dict={X: X_mb, T: T_mb, Z: Z_mb})
+
     # Train discriminator (only when the discriminator does not work well)
     if (check_d_loss > 0.15):        
       _, step_d_loss = sess.run([D_solver, D_loss], feed_dict={X: X_mb, T: T_mb, Z: Z_mb})
-        
+      d_loss.append(step_d_loss)
+
     # Print multiple checkpoints
     if itt % 1000 == 0:
       print('step: '+ str(itt) + '/' + str(iterations) + 
@@ -289,7 +301,9 @@ def timegan (ori_data, parameters):
             ', g_loss_u: ' + str(np.round(step_g_loss_u,4)) + 
             ', g_loss_s: ' + str(np.round(np.sqrt(step_g_loss_s),4)) + 
             ', g_loss_v: ' + str(np.round(step_g_loss_v,4)) + 
-            ', e_loss_t0: ' + str(np.round(np.sqrt(step_e_loss_t0),4))  )
+            ', e_loss_t0: ' + str(np.round(np.sqrt(step_e_loss_t0),4)))
+
+  loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'])
   print('Finish Joint Training')
     
   ## Synthetic data generation
