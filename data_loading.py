@@ -22,23 +22,9 @@ data_loading.py
 
 ## Necessary Packages
 import numpy as np
+from sklearn.preprocessing import MinMaxScaler
 
 from preprocess import get_cz_bank_data
-
-
-def MinMaxScaler(data):
-  """Min Max normalizer.
-  
-  Args:
-    - data: original data
-  
-  Returns:
-    - norm_data: normalized data
-  """
-  numerator = data - np.min(data, 0)
-  denominator = np.max(data, 0) - np.min(data, 0)
-  norm_data = numerator / (denominator + 1e-7)
-  return norm_data
 
 
 def sine_data_generation (no, seq_len, dim):
@@ -100,21 +86,22 @@ def  real_data_loading (data_name, seq_len):
     # Flip the data to make chronological data
     ori_data = ori_data[::-1]
   elif data_name == 'czb':
-    ori_data = get_cz_bank_data(acc_id='A0000002970')
+    ori_data, labels = get_cz_bank_data(acc_id='A0000002970')
 
   # Normalize the data
-  ori_data = MinMaxScaler(ori_data)
+  scaler = MinMaxScaler()
+  ori_data = scaler.fit_transform(ori_data).astype(np.float32)
     
   # Preprocess the dataset
   temp_data = []    
   # Cut data by sequence length
-  for i in range(0, len(ori_data) - seq_len):
+  for i in range(len(ori_data) - seq_len):
     _x = ori_data[i:i + seq_len]
     temp_data.append(_x)
         
-  # Mix the datasets (to make it similar to i.i.d)
-  idx = np.random.permutation(len(temp_data))    
-  data = []
-  for i in range(len(temp_data)):
-    data.append(temp_data[idx[i]])
-  return data
+  # # Mix the datasets (to make it similar to i.i.d)
+  # idx = np.random.permutation(len(temp_data))
+  # data = []
+  # for i in range(len(temp_data)):
+  #   data.append(temp_data[idx[i]])
+  return temp_data, labels, scaler

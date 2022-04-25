@@ -38,7 +38,7 @@ def visualization (ori_data, generated_data, analysis, dataset, labels):
   """
 
   plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'plot', '{analysis}_{cur_date}.png')
-  dist_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'dist', '{cur_date}.png')
+  dist_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'dist')
 
   # Analysis sample size (for faster computation)
   anal_sample_no = min([1000, len(ori_data)])
@@ -116,21 +116,20 @@ def visualization (ori_data, generated_data, analysis, dataset, labels):
     plt.savefig(plot_path.format(analysis=analysis, cur_date=cur_date))
     plt.show()
 
-  fake_real_plot(ori_data, generated_data, dist_path.format(analysis=analysis, cur_date=cur_date), cur_date, labels)
+  fake_real_plot(ori_data, generated_data, dist_path.format(cur_date=cur_date), cur_date, labels)
 
 
-def loss_plot(step_d_loss, step_g_loss_u, step_g_loss_s, step_g_loss_v, step_e_loss_t0, iterations, dataset):
-    x = range(iterations)
+def loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, dataset):
     now = datetime.now()
     cur_date = now.strftime("%Y-%m-%d-%H")
 
-    plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'loss', '{analysis}_{cur_date}.png')
+    plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'loss', '{cur_date}.png')
 
-    plt.plot(x, step_d_loss, label="Disriminator Loss")
-    plt.plot(x, step_g_loss_u, label="Generator Adversarial Loss")
-    plt.plot(x, step_g_loss_s, label="Generator Supervised(Hidden) Loss")
-    plt.plot(x, step_g_loss_v, label="Generator Moment Loss")
-    plt.plot(x, step_e_loss_t0, label="Embedder Loss")
+    plt.plot(range(len(d_loss)), d_loss, label="Disriminator Loss")
+    plt.plot(range(len(g_loss_u)), g_loss_u, label="Generator Adversarial Loss")
+    plt.plot(range(len(g_loss_u)), g_loss_s, label="Generator Supervised(Hidden) Loss")
+    plt.plot(range(len(g_loss_u)), g_loss_v, label="Generator Moment Loss")
+    plt.plot(range(len(g_loss_u)), e_loss_t0, label="Embedder Loss")
     plt.legend()
     plt.savefig(plot_path.format(cur_date=cur_date))
     plt.show()
@@ -165,9 +164,9 @@ def fake_real_plot(x_real, x_fake, plot_path, fake_filename, labels):
     # plot the histogram for each column in fake and real data
     directory = os.path.splitext(fake_filename)[0]
     os.mkdir(os.path.join(plot_path, directory))
-    for c in x_fake.shape[1]:
-        fake_col = x_fake[:, c]
-        real_col = x_real[:, c]
+    for c in range(x_fake.shape[2]):
+        fake_col = x_fake[:, :, c]
+        real_col = x_real[:, :, c]
         ax = compare_hists(real_col, fake_col, ax=None, label=labels[c])
         ax.plot()
         plt.savefig(os.path.join(plot_path, directory, f"{c}.png"))

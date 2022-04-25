@@ -53,7 +53,7 @@ fake_path = os.path.join(Path(__file__).parent, 'data', dataset, 'timegan_fake_{
 result_path = os.path.join(Path(__file__).parent, 'results', dataset, 'numeric', '{cur_date}.json')
 
 
-def main(args):
+def main(args, cur_date):
     """Main function for timeGAN experiments.
   Args:
     - data_name: sine, stock, or energy
@@ -73,7 +73,7 @@ def main(args):
   """
     # Data loading
     if args.data_name in ['stock', 'energy', 'czb']:
-        ori_data, labels = real_data_loading(args.data_name, args.seq_len)
+        ori_data, labels, scaler = real_data_loading(args.data_name, args.seq_len)
     elif args.data_name == 'sine':
         # Set number of samples and its dimensions
         no, dim = 10000, 5
@@ -90,6 +90,8 @@ def main(args):
     parameters['iterations'] = args.iteration
     parameters['batch_size'] = args.batch_size
     parameters['data_name'] = args.data_name
+    parameters['cur_date'] = cur_date
+    parameters['scaler'] = scaler
 
     generated_data = timegan(ori_data, parameters)
     print('Finish Synthetic Data Generation')
@@ -170,11 +172,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # Calls main function
-    ori_data, generated_data, metrics = main(args)
-
     now = datetime.now()
     cur_date = now.strftime("%Y-%m-%d-%H")
+
+    # Calls main function
+    ori_data, generated_data, metrics = main(args, cur_date)
 
     with open(real_path.format(cur_date=cur_date), 'w') as f:
         write = csv.writer(f)

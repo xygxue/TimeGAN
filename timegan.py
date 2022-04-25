@@ -17,12 +17,20 @@ Note: Use original data as training set to generater synthetic data (time-series
 """
 
 # Necessary Packages
-import tensorflow as tf
+import os
+from pathlib import Path
+
 import numpy as np
+import tensorflow as tf
+from tensorflow.keras.layers import GRU, Dense, Input
+from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import plot_model
+from importlib import reload
+
 from tqdm import tqdm
 
-from metrics.visualization_metrics import loss_plot
-from utils import extract_time, rnn_cell, random_generator, batch_generator
 
 
 def timegan (ori_data, parameters):
@@ -37,287 +45,352 @@ def timegan (ori_data, parameters):
   Returns:
     - generated_data: generated time-series data
   """
-  # Initialization on the Graph
-  tf.reset_default_graph()
 
   # Basic Parameters
-  no, seq_len, dim = np.asarray(ori_data).shape
-    
-  # Maximum sequence length and each sequence length
-  ori_time, max_seq_len = extract_time(ori_data)
-  
-  def MinMaxScaler(data):
-    """Min-Max Normalizer.
-    
-    Args:
-      - data: raw data
-      
-    Returns:
-      - norm_data: normalized data
-      - min_val: minimum values (for renormalization)
-      - max_val: maximum values (for renormalization)
-    """    
-    min_val = np.min(np.min(data, axis = 0), axis = 0)
-    data = data - min_val
-      
-    max_val = np.max(np.max(data, axis = 0), axis = 0)
-    norm_data = data / (max_val + 1e-7)
-      
-    return norm_data, min_val, max_val
-  
-  # Normalization
-  ori_data, min_val, max_val = MinMaxScaler(ori_data)
-              
-  ## Build a RNN networks          
-  
+  n_windows, seq_len, dim = np.asarray(ori_data).shape
+
   # Network Parameters
-  hidden_dim   = parameters['hidden_dim'] 
-  num_layers   = parameters['num_layer']
-  iterations   = parameters['iterations']
-  batch_size   = parameters['batch_size']
-  module_name  = parameters['module'] 
-  z_dim        = dim
-  gamma        = 1
+  hidden_dim = parameters['hidden_dim']
+  num_layers = parameters['num_layer']
+  iterations = parameters['iterations']
+  batch_size = parameters['batch_size']
+  scaler = parameters['scaler']
+  gamma = 1
+
+  # Device check
+  gpu_devices = tf.config.experimental.list_physical_devices('GPU')
+  if gpu_devices:
+    print('Using GPU')
+    tf.config.experimental.set_memory_growth(gpu_devices[0], True)
+  else:
+    print('Using CPU')
+
+  # Create tf.data.Dataset
+  real_series = (tf.data.Dataset
+                 .from_tensor_slices(ori_data)
+                 .shuffle(buffer_size=n_windows)
+                 .batch(batch_size))
+  real_series_iter = iter(real_series.repeat())
+
+  # Set up random series generator
+  def make_random_data():
+    while True:
+      yield np.random.uniform(low=0, high=1, size=(seq_len, dim))
+  random_series = iter(tf.data.Dataset
+                       .from_generator(make_random_data, output_types=tf.float32)
+                       .batch(batch_size)
+                       .repeat())
+  # Set up Logger
+  cur_date = parameters['cur_date']
+  log_dir = os.path.join(Path(__file__).parent, 'log', f'{cur_date}')
+  if not os.path.exists(log_dir):
+    os.mkdir(log_dir)
+  writer = tf.summary.create_file_writer(log_dir)
+
+  ## Build a RNN networks
     
   # Input place holders
-  X = tf.placeholder(tf.float32, [None, max_seq_len, dim], name = "myinput_x")
-  Z = tf.placeholder(tf.float32, [None, max_seq_len, z_dim], name = "myinput_z")
-  T = tf.placeholder(tf.int32, [None], name = "myinput_t")
-  
-  def embedder (X, T):
-    """Embedding network between original feature space to latent space.
-    
-    Args:
-      - X: input time-series features
-      - T: input time information
+  X = Input(shape=[seq_len, dim], name='RealData')
+  Z = Input(shape=[seq_len, dim], name='RandomData')
+
+  # T = tf.placeholder(tf.int32, [None], name = "myinput_t")
+
+  def make_rnn(n_layers, hidden_units, output_units, name):
+    return Sequential([GRU(units=hidden_units,
+                           return_sequences=True,
+                           name=f'GRU_{i + 1}') for i in range(n_layers)] +
+                      [Dense(units=output_units,
+                             activation='sigmoid',
+                             name='OUT')], name=name)
+
+  # Embedding network between original feature space to latent space.
+
+  embedder = make_rnn(n_layers=num_layers,
+                      hidden_units=hidden_dim,
+                      output_units=hidden_dim,
+                      name='Embedder')
       
-    Returns:
-      - H: embeddings
-    """
-    with tf.variable_scope("embedder", reuse = tf.AUTO_REUSE):
-      e_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(module_name, hidden_dim) for _ in range(num_layers)])
-      e_outputs, e_last_states = tf.nn.dynamic_rnn(e_cell, X, dtype=tf.float32, sequence_length = T)
-      H = tf.contrib.layers.fully_connected(e_outputs, hidden_dim, activation_fn=tf.nn.sigmoid)     
-    return H
+
+  # Recovery network from latent space to original space.
+  recovery = make_rnn(n_layers=num_layers,
+                      hidden_units=hidden_dim,
+                      output_units=dim,
+                      name='Recovery')
+
+  # Generator function: Generate time-series data in latent space.
+  generator = make_rnn(n_layers=3,
+                       hidden_units=hidden_dim,
+                       output_units=hidden_dim,
+                       name='Generator')
       
-  def recovery (H, T):   
-    """Recovery network from latent space to original space.
-    
-    Args:
-      - H: latent representation
-      - T: input time information
-      
-    Returns:
-      - X_tilde: recovered data
-    """     
-    with tf.variable_scope("recovery", reuse = tf.AUTO_REUSE):       
-      r_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(module_name, hidden_dim) for _ in range(num_layers)])
-      r_outputs, r_last_states = tf.nn.dynamic_rnn(r_cell, H, dtype=tf.float32, sequence_length = T)
-      X_tilde = tf.contrib.layers.fully_connected(r_outputs, dim, activation_fn=tf.nn.sigmoid) 
-    return X_tilde
-    
-  def generator (Z, T):  
-    """Generator function: Generate time-series data in latent space.
-    
-    Args:
-      - Z: random variables
-      - T: input time information
-      
-    Returns:
-      - E: generated embedding
-    """        
-    with tf.variable_scope("generator", reuse = tf.AUTO_REUSE):
-      e_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(module_name, hidden_dim) for _ in range(num_layers)])
-      e_outputs, e_last_states = tf.nn.dynamic_rnn(e_cell, Z, dtype=tf.float32, sequence_length = T)
-      E = tf.contrib.layers.fully_connected(e_outputs, hidden_dim, activation_fn=tf.nn.sigmoid)     
-    return E
-      
-  def supervisor(H, T):
-    """Generate next sequence using the previous sequence.
-    
-    Args:
-      - H: latent representation
-      - T: input time information
-      
-    Returns:
-      - S: generated sequence based on the latent representations generated by the generator
-    """          
-    with tf.variable_scope("supervisor", reuse=tf.AUTO_REUSE):
-      e_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(module_name, hidden_dim) for _ in range(num_layers-1)])
-      e_outputs, e_last_states = tf.nn.dynamic_rnn(e_cell, H, dtype=tf.float32, sequence_length = T)
-      S = tf.contrib.layers.fully_connected(e_outputs, hidden_dim, activation_fn=tf.nn.sigmoid)     
-    return S
+  # Generate next sequence using the previous sequence.
+
+  supervisor = make_rnn(n_layers=num_layers,
+                        hidden_units=hidden_dim,
+                        output_units=hidden_dim,
+                        name='Supervisor')
           
-  def discriminator(H, T):
-    """Discriminate the original and synthetic time-series data.
-    
-    Args:
-      - H: latent representation
-      - T: input time information
-      
-    Returns:
-      - Y_hat: classification results between original and synthetic time-series
-    """        
-    with tf.variable_scope("discriminator", reuse = tf.AUTO_REUSE):
-      d_cell = tf.nn.rnn_cell.MultiRNNCell([rnn_cell(module_name, hidden_dim) for _ in range(num_layers)])
-      d_outputs, d_last_states = tf.nn.dynamic_rnn(d_cell, H, dtype=tf.float32, sequence_length = T)
-      Y_hat = tf.contrib.layers.fully_connected(d_outputs, 1, activation_fn=None) 
-    return Y_hat   
-    
+  # Discriminate the original and synthetic time-series data.
+  discriminator = make_rnn(n_layers=num_layers-1,
+                           hidden_units=hidden_dim,
+                           output_units=1,
+                           name='Discriminator')
+
   # Embedder & Recovery
-  H = embedder(X, T)
-  X_tilde = recovery(H, T)
-    
+  H = embedder(X)
+  X_tilde = recovery(H)
+
+  autoencoder = Model(inputs=X,
+                      outputs=X_tilde,
+                      name='Autoencoder')
+  autoencoder.summary()
+  plot_model(autoencoder,
+             to_file='model/autoencoder.png',
+             show_shapes=True)
+
   # Generator
-  E_hat = generator(Z, T)
-  H_hat = supervisor(E_hat, T)
-  H_hat_supervise = supervisor(H, T)
-    
+  # Adversarial Architecture - Supervised
+  E_hat = generator(Z)
+  H_hat = supervisor(E_hat)
+  Y_fake = discriminator(H_hat)
+
+  adversarial_supervised = Model(inputs=Z,
+                                 outputs=Y_fake,
+                                 name='AdversarialNetSupervised')
+  adversarial_supervised.summary()
+  plot_model(adversarial_supervised, show_shapes=True)
+
+  # Adversarial Architecture in Latent Space
+  Y_fake_e = discriminator(E_hat)
+
+  adversarial_emb = Model(inputs=Z,
+                          outputs=Y_fake_e,
+                          name='AdversarialNet')
+  adversarial_emb.summary()
+
+  plot_model(adversarial_emb, show_shapes=True)
+
+  # Mean & Variance Loss
   # Synthetic data
-  X_hat = recovery(H_hat, T)
-    
+  X_hat = recovery(H_hat)
+  synthetic_data = Model(inputs=Z,
+                         outputs=X_hat,
+                         name='SyntheticData')
+  synthetic_data.summary()
+  plot_model(synthetic_data, show_shapes=True)
+
   # Discriminator
-  Y_fake = discriminator(H_hat, T)
-  Y_real = discriminator(H, T)     
-  Y_fake_e = discriminator(E_hat, T)
+  # Architecture: Real Data
+  Y_real = discriminator(H)
+  discriminator_model = Model(inputs=X,
+                              outputs=Y_real,
+                              name='DiscriminatorReal')
+  discriminator_model.summary()
+  plot_model(discriminator_model, show_shapes=True)
+
     
-  # Variables        
-  e_vars = [v for v in tf.trainable_variables() if v.name.startswith('embedder')]
-  r_vars = [v for v in tf.trainable_variables() if v.name.startswith('recovery')]
-  g_vars = [v for v in tf.trainable_variables() if v.name.startswith('generator')]
-  s_vars = [v for v in tf.trainable_variables() if v.name.startswith('supervisor')]
-  d_vars = [v for v in tf.trainable_variables() if v.name.startswith('discriminator')]
-    
-  # Discriminator loss
-  D_loss_real = tf.losses.sigmoid_cross_entropy(tf.ones_like(Y_real), Y_real)
-  D_loss_fake = tf.losses.sigmoid_cross_entropy(tf.zeros_like(Y_fake), Y_fake)
-  D_loss_fake_e = tf.losses.sigmoid_cross_entropy(tf.zeros_like(Y_fake_e), Y_fake_e)
-  D_loss = D_loss_real + D_loss_fake + gamma * D_loss_fake_e
-            
-  # Generator loss
-  # 1. Adversarial loss
-  G_loss_U = tf.losses.sigmoid_cross_entropy(tf.ones_like(Y_fake), Y_fake)
-  G_loss_U_e = tf.losses.sigmoid_cross_entropy(tf.ones_like(Y_fake_e), Y_fake_e)
-    
-  # 2. Supervised loss
-  G_loss_S = tf.losses.mean_squared_error(H[:,1:,:], H_hat_supervise[:,:-1,:])
-    
-  # 3. Two Momments
-  G_loss_V1 = tf.reduce_mean(tf.abs(tf.sqrt(tf.nn.moments(X_hat,[0])[1] + 1e-6) - tf.sqrt(tf.nn.moments(X,[0])[1] + 1e-6)))
-  G_loss_V2 = tf.reduce_mean(tf.abs((tf.nn.moments(X_hat,[0])[0]) - (tf.nn.moments(X,[0])[0])))
-    
-  G_loss_V = G_loss_V1 + G_loss_V2
-    
-  # 4. Summation
-  G_loss = G_loss_U + gamma * G_loss_U_e + 100 * tf.sqrt(G_loss_S) + 100*G_loss_V 
-            
-  # Embedder network loss
-  E_loss_T0 = tf.losses.mean_squared_error(X, X_tilde)
-  E_loss0 = 10*tf.sqrt(E_loss_T0)
-  E_loss = E_loss0 + 0.1*G_loss_S
+  # Generic Loss
+  mse = MeanSquaredError()
+  bce = BinaryCrossentropy()
+
+  # Momment Loss
+  def get_generator_moment_loss(y_true, y_pred):
+    y_true_mean, y_true_var = tf.nn.moments(x=y_true, axes=[0])
+    y_pred_mean, y_pred_var = tf.nn.moments(x=y_pred, axes=[0])
+    g_loss_mean = tf.reduce_mean(tf.abs(y_true_mean - y_pred_mean))
+    g_loss_var = tf.reduce_mean(tf.abs(tf.sqrt(y_true_var + 1e-6) - tf.sqrt(y_pred_var + 1e-6)))
+    return g_loss_mean + g_loss_var
     
   # optimizer
-  E0_solver = tf.train.AdamOptimizer().minimize(E_loss0, var_list = e_vars + r_vars)
-  E_solver = tf.train.AdamOptimizer().minimize(E_loss, var_list = e_vars + r_vars)
-  D_solver = tf.train.AdamOptimizer().minimize(D_loss, var_list = d_vars)
-  G_solver = tf.train.AdamOptimizer().minimize(G_loss, var_list = g_vars + s_vars)      
-  GS_solver = tf.train.AdamOptimizer().minimize(G_loss_S, var_list = g_vars + s_vars)   
-        
+  autoencoder_optimizer = Adam()
+  supervisor_optimizer = Adam()
+  generator_optimizer = Adam()
+  discriminator_optimizer = Adam()
+  embedding_optimizer = Adam()
+
   ## TimeGAN training
-  sess = tf.Session()
-  sess.run(tf.global_variables_initializer())
-    
+
   # 1. Embedding network training
   print('Start Embedding Network Training')
-    
-  for itt in tqdm(range(iterations)):
-    # Set mini-batch
-    X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)           
-    # Train embedder        
-    _, step_e_loss = sess.run([E0_solver, E_loss_T0], feed_dict={X: X_mb, T: T_mb})        
-    # Checkpoint
-    if itt % 1000 == 0:
-      print('step: '+ str(itt) + '/' + str(iterations) + ', e_loss: ' + str(np.round(np.sqrt(step_e_loss),4)) ) 
+
+  @tf.function
+  def train_autoencoder_init(x):
+    with tf.GradientTape() as tape:
+      x_tilde = autoencoder(x)
+      embedding_loss_t0 = mse(x, x_tilde)
+      e_loss_0 = 10 * tf.sqrt(embedding_loss_t0)
+
+    var_list = embedder.trainable_variables + recovery.trainable_variables
+    gradients = tape.gradient(e_loss_0, var_list)
+    autoencoder_optimizer.apply_gradients(zip(gradients, var_list))
+    return tf.sqrt(embedding_loss_t0)
+
+  for step in tqdm(range(iterations)):
+    X_ = next(real_series_iter)
+    step_e_loss_t0 = train_autoencoder_init(X_)
+    with writer.as_default():
+      tf.summary.scalar('Loss Autoencoder Init', step_e_loss_t0, step=step)
       
   print('Finish Embedding Network Training')
     
   # 2. Training only with supervised loss
   print('Start Training with Supervised Loss Only')
-    
-  for itt in tqdm(range(iterations)):
-    # Set mini-batch
-    X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)    
-    # Random vector generation   
-    Z_mb = random_generator(batch_size, z_dim, T_mb, max_seq_len)
-    # Train generator       
-    _, step_g_loss_s = sess.run([GS_solver, G_loss_S], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})       
-    # Checkpoint
-    if itt % 1000 == 0:
-      print('step: ' + str(itt) + '/' + str(iterations) + ', s_loss: ' + str(np.round(np.sqrt(step_g_loss_s), 4)))
+
+  # Train Step
+  @tf.function
+  def train_supervisor(x):
+    with tf.GradientTape() as tape:
+      h = embedder(x)
+      h_hat_supervised = supervisor(h)
+      g_loss_s = mse(h[:, 1:, :], h_hat_supervised[:, :-1, :])
+
+    var_list = supervisor.trainable_variables
+    gradients = tape.gradient(g_loss_s, var_list)
+    supervisor_optimizer.apply_gradients(zip(gradients, var_list))
+    return g_loss_s
+
+  # Training Loop
+  for step in tqdm(range(iterations)):
+    X_ = next(real_series_iter)
+    step_g_loss_s = train_supervisor(X_)
+    with writer.as_default():
+      tf.summary.scalar('Loss Generator Supervised Init', step_g_loss_s, step=step)
       
   print('Finish Training with Supervised Loss Only')
     
   # 3. Joint Training
   print('Start Joint Training')
 
+  # Generator Train Step
+  @tf.function
+  def train_generator(x, z):
+    with tf.GradientTape() as tape:
+      y_fake = adversarial_supervised(z)
+      generator_loss_unsupervised = bce(y_true=tf.ones_like(y_fake),
+                                        y_pred=y_fake)
+
+      y_fake_e = adversarial_emb(z)
+      generator_loss_unsupervised_e = bce(y_true=tf.ones_like(y_fake_e),
+                                          y_pred=y_fake_e)
+      h = embedder(x)
+      h_hat_supervised = supervisor(h)
+      generator_loss_supervised = mse(h[:, 1:, :], h_hat_supervised[:, 1:, :])
+
+      x_hat = synthetic_data(z)
+      generator_moment_loss = get_generator_moment_loss(x, x_hat)
+
+      generator_loss = (generator_loss_unsupervised +
+                        generator_loss_unsupervised_e +
+                        100 * tf.sqrt(generator_loss_supervised) +
+                        100 * generator_moment_loss)
+
+    var_list = generator.trainable_variables + supervisor.trainable_variables
+    gradients = tape.gradient(generator_loss, var_list)
+    generator_optimizer.apply_gradients(zip(gradients, var_list))
+    return generator_loss_unsupervised, generator_loss_supervised, generator_moment_loss
+
+  # Embedding Train Step
+  @tf.function
+  def train_embedder(x):
+    with tf.GradientTape() as tape:
+      h = embedder(x)
+      h_hat_supervised = supervisor(h)
+      generator_loss_supervised = mse(h[:, 1:, :], h_hat_supervised[:, 1:, :])
+
+      x_tilde = autoencoder(x)
+      embedding_loss_t0 = mse(x, x_tilde)
+      e_loss = 10 * tf.sqrt(embedding_loss_t0) + 0.1 * generator_loss_supervised
+
+    var_list = embedder.trainable_variables + recovery.trainable_variables
+    gradients = tape.gradient(e_loss, var_list)
+    embedding_optimizer.apply_gradients(zip(gradients, var_list))
+    return tf.sqrt(embedding_loss_t0)
+
+  # Discriminator Train Step
+  @tf.function
+  def get_discriminator_loss(x, z):
+    y_real = discriminator_model(x)
+    discriminator_loss_real = bce(y_true=tf.ones_like(y_real),
+                                  y_pred=y_real)
+
+    y_fake = adversarial_supervised(z)
+    discriminator_loss_fake = bce(y_true=tf.zeros_like(y_fake),
+                                  y_pred=y_fake)
+
+    y_fake_e = adversarial_emb(z)
+    discriminator_loss_fake_e = bce(y_true=tf.zeros_like(y_fake_e),
+                                    y_pred=y_fake_e)
+    return (discriminator_loss_real +
+            discriminator_loss_fake +
+            gamma * discriminator_loss_fake_e)
+
+  @tf.function
+  def train_discriminator(x, z):
+    with tf.GradientTape() as tape:
+      discriminator_loss = get_discriminator_loss(x, z)
+
+    var_list = discriminator.trainable_variables
+    gradients = tape.gradient(discriminator_loss, var_list)
+    discriminator_optimizer.apply_gradients(zip(gradients, var_list))
+    return discriminator_loss
+
+  # Training Loop
   d_loss = []
   g_loss_u = []
   g_loss_s = []
   g_loss_v = []
   e_loss_t0 = []
-  for itt in tqdm(range(iterations)):
-    # Generator training (twice more than discriminator training)
+  step_g_loss_u = step_g_loss_s = step_g_loss_v = step_e_loss_t0 = step_d_loss = 0
+
+  for step in range(iterations):
+    # Train generator (twice as often as discriminator)
     for kk in range(2):
-      # Set mini-batch
-      X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)               
-      # Random vector generation
-      Z_mb = random_generator(batch_size, z_dim, T_mb, max_seq_len)
+      X_ = next(real_series_iter)
+      Z_ = next(random_series)
+
       # Train generator
-      _, step_g_loss_u, step_g_loss_s, step_g_loss_v = sess.run([G_solver, G_loss_U, G_loss_S, G_loss_V], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})
-       # Train embedder        
-      _, step_e_loss_t0 = sess.run([E_solver, E_loss_T0], feed_dict={Z: Z_mb, X: X_mb, T: T_mb})
+      step_g_loss_u, step_g_loss_s, step_g_loss_v = train_generator(X_, Z_)
+      # Train embedder
+      step_e_loss_t0 = train_embedder(X_)
       g_loss_u.append(step_g_loss_u)
       g_loss_s.append(step_g_loss_s)
       g_loss_v.append(step_g_loss_v)
       e_loss_t0.append(step_e_loss_t0)
 
-    # Discriminator training        
-    # Set mini-batch
-    X_mb, T_mb = batch_generator(ori_data, ori_time, batch_size)           
-    # Random vector generation
-    Z_mb = random_generator(batch_size, z_dim, T_mb, max_seq_len)
-    # Check discriminator loss before updating
-    check_d_loss = sess.run(D_loss, feed_dict={X: X_mb, T: T_mb, Z: Z_mb})
-
-    # Train discriminator (only when the discriminator does not work well)
-    if (check_d_loss > 0.15):        
-      _, step_d_loss = sess.run([D_solver, D_loss], feed_dict={X: X_mb, T: T_mb, Z: Z_mb})
+    X_ = next(real_series_iter)
+    Z_ = next(random_series)
+    step_d_loss = get_discriminator_loss(X_, Z_)
+    if step_d_loss > 0.15:
+      step_d_loss = train_discriminator(X_, Z_)
       d_loss.append(step_d_loss)
 
-    # Print multiple checkpoints
-    if itt % 1000 == 0:
-      print('step: '+ str(itt) + '/' + str(iterations) + 
-            ', d_loss: ' + str(np.round(step_d_loss,4)) + 
-            ', g_loss_u: ' + str(np.round(step_g_loss_u,4)) + 
-            ', g_loss_s: ' + str(np.round(np.sqrt(step_g_loss_s),4)) + 
-            ', g_loss_v: ' + str(np.round(step_g_loss_v,4)) + 
-            ', e_loss_t0: ' + str(np.round(np.sqrt(step_e_loss_t0),4)))
+    if step % 1000 == 0:
+      print(f'{step:6,.0f} | d_loss: {step_d_loss:6.4f} | g_loss_u: {step_g_loss_u:6.4f} | '
+            f'g_loss_s: {step_g_loss_s:6.4f} | g_loss_v: {step_g_loss_v:6.4f} | e_loss_t0: {step_e_loss_t0:6.4f}')
+
+    with writer.as_default():
+      tf.summary.scalar('G Loss S', step_g_loss_s, step=step)
+      tf.summary.scalar('G Loss U', step_g_loss_u, step=step)
+      tf.summary.scalar('G Loss V', step_g_loss_v, step=step)
+      tf.summary.scalar('E Loss T0', step_e_loss_t0, step=step)
+      tf.summary.scalar('D Loss', step_d_loss, step=step)
 
   loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'])
   print('Finish Joint Training')
-    
+
+  # Persist Synthetic Data Generator
+  synthetic_data.save(os.path.join(log_dir, 'synthetic_data'))
+
   ## Synthetic data generation
-  Z_mb = random_generator(no, z_dim, ori_time, max_seq_len)
-  generated_data_curr = sess.run(X_hat, feed_dict={Z: Z_mb, X: ori_data, T: ori_time})    
-    
-  generated_data = list()
-    
-  for i in range(no):
-    temp = generated_data_curr[i,:ori_time[i],:]
-    generated_data.append(temp)
+  generated_data = []
+  for i in range(int(n_windows/batch_size)):
+    Z_ = next(random_series)
+    d = synthetic_data(Z_)
+    generated_data.append(d)
+
+  generated_data = np.array(np.vstack(generated_data))
         
   # Renormalization
-  generated_data = generated_data * max_val
-  generated_data = generated_data + min_val
-    
+  generated_data = (scaler.inverse_transform(generated_data.reshape(-1, dim)).reshape(-1, seq_len, dim))
+
   return generated_data
