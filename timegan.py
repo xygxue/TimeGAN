@@ -31,6 +31,7 @@ from importlib import reload
 
 from tqdm import tqdm
 
+from metrics.visualization_metrics import loss_plot
 
 
 def timegan (ori_data, parameters):
@@ -122,16 +123,16 @@ def timegan (ori_data, parameters):
   #                      hidden_units=hidden_dim,
   #                      output_units=hidden_dim,
   #                      name='Generator')
-  generator = Sequential([LSTM(units=hidden_dim,
+  generator = Sequential([GRU(units=hidden_dim,
                                return_sequences=True,
                                name=f'LSTM_{i + 1}') for i in range(num_layers)] +
                          [Dropout(.2)] +
-                         [GRU(units=hidden_dim,
+                         [LSTM(units=hidden_dim,
                                return_sequences=True,
-                               name=f'GRU_{i + 1}') for i in range(num_layers)] +
+                               name=f'GRU_{i + 1}') for i in range(num_layers+3)] +
                          [Dropout(.2)] +
                          [Dense(units=hidden_dim,
-                                activation='sigmoid',
+                                activation='tanh',
                                 name='OUT')], name='Generator')
       
   # Generate next sequence using the previous sequence.
@@ -161,9 +162,9 @@ def timegan (ori_data, parameters):
                       outputs=X_tilde,
                       name='Autoencoder')
   autoencoder.summary()
-  plot_model(autoencoder,
-             to_file='model/autoencoder.png',
-             show_shapes=True)
+  # plot_model(autoencoder,
+  #            to_file='model/autoencoder.png',
+  #            show_shapes=True)
 
   # Generator
   # Adversarial Architecture - Supervised
@@ -175,7 +176,7 @@ def timegan (ori_data, parameters):
                                  outputs=Y_fake,
                                  name='AdversarialNetSupervised')
   adversarial_supervised.summary()
-  plot_model(adversarial_supervised, show_shapes=True)
+  # plot_model(adversarial_supervised, to_file='model/adversarial_supervised.png', show_shapes=True)
 
   # Adversarial Architecture in Latent Space
   Y_fake_e = discriminator(E_hat)
@@ -185,7 +186,7 @@ def timegan (ori_data, parameters):
                           name='AdversarialNet')
   adversarial_emb.summary()
 
-  plot_model(adversarial_emb, show_shapes=True)
+  # plot_model(adversarial_emb, to_file='model/adversarial_emb.png', show_shapes=True)
 
   # Mean & Variance Loss
   # Synthetic data
@@ -194,7 +195,7 @@ def timegan (ori_data, parameters):
                          outputs=X_hat,
                          name='SyntheticData')
   synthetic_data.summary()
-  plot_model(synthetic_data, show_shapes=True)
+  # plot_model(synthetic_data, to_file='model/synthetic_data.png', show_shapes=True)
 
   # Discriminator
   # Architecture: Real Data
@@ -203,7 +204,7 @@ def timegan (ori_data, parameters):
                               outputs=Y_real,
                               name='DiscriminatorReal')
   discriminator_model.summary()
-  plot_model(discriminator_model, show_shapes=True)
+  # plot_model(discriminator_model, to_file='model/discriminator_model.png',show_shapes=True)
 
     
   # Generic Loss
