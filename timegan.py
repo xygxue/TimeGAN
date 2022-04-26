@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import GRU, Dense, Input
+from tensorflow.keras.layers import GRU, Dense, Input, Dropout, LSTM
 from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
@@ -96,7 +96,7 @@ def timegan (ori_data, parameters):
   # T = tf.placeholder(tf.int32, [None], name = "myinput_t")
 
   def make_rnn(n_layers, hidden_units, output_units, name):
-    return Sequential([GRU(units=hidden_units,
+    return Sequential([LSTM(units=hidden_units,
                            return_sequences=True,
                            name=f'GRU_{i + 1}') for i in range(n_layers)] +
                       [Dense(units=output_units,
@@ -118,10 +118,21 @@ def timegan (ori_data, parameters):
                       name='Recovery')
 
   # Generator function: Generate time-series data in latent space.
-  generator = make_rnn(n_layers=3,
-                       hidden_units=hidden_dim,
-                       output_units=hidden_dim,
-                       name='Generator')
+  # generator = make_rnn(n_layers=3,
+  #                      hidden_units=hidden_dim,
+  #                      output_units=hidden_dim,
+  #                      name='Generator')
+  generator = Sequential([LSTM(units=hidden_dim,
+                               return_sequences=True,
+                               name=f'LSTM_{i + 1}') for i in range(num_layers)] +
+                         [Dropout(.2)] +
+                         [GRU(units=hidden_dim,
+                               return_sequences=True,
+                               name=f'GRU_{i + 1}') for i in range(num_layers)] +
+                         [Dropout(.2)] +
+                         [Dense(units=hidden_dim,
+                                activation='sigmoid',
+                                name='OUT')], name='Generator')
       
   # Generate next sequence using the previous sequence.
 
@@ -131,10 +142,16 @@ def timegan (ori_data, parameters):
                         name='Supervisor')
           
   # Discriminate the original and synthetic time-series data.
-  discriminator = make_rnn(n_layers=num_layers-1,
-                           hidden_units=hidden_dim,
-                           output_units=1,
-                           name='Discriminator')
+  # discriminator = make_rnn(n_layers=num_layers-1,
+  #                          hidden_units=hidden_dim,
+  #                          output_units=1,
+  #                          name='Discriminator')
+  discriminator = Sequential([GRU(units=hidden_dim,
+                                  return_sequences=True,
+                                  name=f'GRU_{i + 1}') for i in range(num_layers-1)] +
+                             [Dense(units=1,
+                                    activation='sigmoid',
+                                    name='OUT')], name='Discriminator')
 
   # Embedder & Recovery
   H = embedder(X)
