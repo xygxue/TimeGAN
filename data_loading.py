@@ -86,7 +86,7 @@ def  real_data_loading (data_name, seq_len):
     # Flip the data to make chronological data
     ori_data = ori_data[::-1]
   elif data_name == 'czb':
-    ori_data, labels = get_cz_bank_data(acc_id='A0000002970')
+    ori_data, labels = get_cz_bank_data(acc_id='A0000009265')
 
   # Normalize the data
   scaler = MinMaxScaler()

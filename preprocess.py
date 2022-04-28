@@ -12,15 +12,16 @@ INTEGER = []
 PROBLEM = {"Classification": 'type'}
 
 
-def get_cz_bank_data(acc_id=None):
+def get_cz_bank_data(acc_id, len_search=False):
     csv_path = os.path.join('data', 'clean_trans.csv')
     df = pd.read_csv(csv_path)
     df.date = pd.to_datetime(df.date)
     df = df.set_index('date')
-    # for i in df['account_id'].unique():
-    #     sing_acc = df.loc[df['account_id'] == i]
-    #     if 200 < len(sing_acc) < 300:
-    #         print(i, len(sing_acc))
+    if len_search:
+        for i in df['account_id'].unique():
+            sing_acc = df.loc[df['account_id'] == i]
+            if 600 < len(sing_acc) < 900:
+                print(i, len(sing_acc))
     data_raw = df.loc[df['account_id'] == acc_id]
     data_raw = data_raw.drop(columns=['account_id', 'trans_id', 'balance'])
     data_prep = DataPrep(data_raw, categorical=CAT,

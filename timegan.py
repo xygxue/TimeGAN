@@ -242,7 +242,7 @@ def timegan (ori_data, parameters):
     autoencoder_optimizer.apply_gradients(zip(gradients, var_list))
     return tf.sqrt(embedding_loss_t0)
 
-  for step in tqdm(range(iterations)):
+  for step in tqdm(range(55000)):
     X_ = next(real_series_iter)
     step_e_loss_t0 = train_autoencoder_init(X_)
     with writer.as_default():
@@ -268,7 +268,7 @@ def timegan (ori_data, parameters):
     return g_loss_s
 
   # Training Loop
-  for step in tqdm(range(iterations)):
+  for step in tqdm(range(55000)):
     X_ = next(real_series_iter)
     step_g_loss_s = train_supervisor(X_)
     with writer.as_default():
@@ -360,7 +360,7 @@ def timegan (ori_data, parameters):
   e_loss_t0 = []
   step_g_loss_u = step_g_loss_s = step_g_loss_v = step_e_loss_t0 = step_d_loss = 0
 
-  for step in range(iterations):
+  for step in range(40000):
     # Train generator (twice as often as discriminator)
     for kk in range(2):
       X_ = next(real_series_iter)
@@ -401,7 +401,7 @@ def timegan (ori_data, parameters):
 
   ## Synthetic data generation
   generated_data = []
-  for i in range(int(n_windows/batch_size)):
+  for i in range(len(ori_data)):
     Z_ = next(random_series)
     d = synthetic_data(Z_)
     generated_data.append(d)
