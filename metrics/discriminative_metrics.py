@@ -21,6 +21,8 @@ Output: discriminative score (np.abs(classification accuracy - 0.5))
 # Necessary Packages
 import tensorflow as tf
 import numpy as np
+from tensorflow.keras import Input, Sequential
+from tensorflow.keras.layers import GRU, Dense
 from sklearn.metrics import accuracy_score
 from utils import train_test_divide, extract_time, batch_generator
 
@@ -36,7 +38,7 @@ def discriminative_score_metrics (ori_data, generated_data):
     - discriminative_score: np.abs(classification accuracy - 0.5)
   """
   # Initialization on the Graph
-  tf.reset_default_graph()
+  tf.compat.v1.reset_default_graph()
 
   # Basic Parameters
   no, seq_len, dim = np.asarray(ori_data).shape    
@@ -54,8 +56,8 @@ def discriminative_score_metrics (ori_data, generated_data):
     
   # Input place holders
   # Feature
-  X = tf.placeholder(tf.float32, [None, max_seq_len, dim], name = "myinput_x")
-  X_hat = tf.placeholder(tf.float32, [None, max_seq_len, dim], name = "myinput_x_hat")
+  X = Input(shape=[seq_len, dim], name='RealData')
+  X_hat = Input(shape=[seq_len, dim], name='FakeData')
     
   T = tf.placeholder(tf.int32, [None], name = "myinput_t")
   T_hat = tf.placeholder(tf.int32, [None], name = "myinput_t_hat")
@@ -79,7 +81,13 @@ def discriminative_score_metrics (ori_data, generated_data):
       y_hat_logit = tf.contrib.layers.fully_connected(d_last_states, 1, activation_fn=None) 
       y_hat = tf.nn.sigmoid(y_hat_logit)
       d_vars = [v for v in tf.all_variables() if v.name.startswith(vs.name)]
-    
+
+    discriminator = Sequential([GRU(units=hidden_dim,
+                    return_sequences=True,
+                    name='GRU_1')] +
+               [Dense(units=1,
+                      activation='sigmoid',
+                      name='OUT')], name='Discriminator')
     return y_hat_logit, y_hat, d_vars
     
   y_logit_real, y_pred_real, d_vars = discriminator(X, T)

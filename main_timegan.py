@@ -100,28 +100,28 @@ def main(args, cur_date):
     # Output initialization
     metric_results = dict()
 
-    # 1. Discriminative Score
-    discriminative_score = list()
-    for _ in range(args.metric_iteration):
-        temp_disc = discriminative_score_metrics(ori_data, generated_data)
-        discriminative_score.append(temp_disc)
-
-    metric_results['discriminative'] = np.mean(discriminative_score)
-
-    # 2. Predictive score
-    predictive_score = list()
-    for tt in range(args.metric_iteration):
-        temp_pred = predictive_score_metrics(ori_data, generated_data)
-        predictive_score.append(temp_pred)
-
-    metric_results['predictive'] = np.mean(predictive_score)
+    # # 1. Discriminative Score
+    # discriminative_score = list()
+    # for _ in range(args.metric_iteration):
+    #     temp_disc = discriminative_score_metrics(ori_data, generated_data)
+    #     discriminative_score.append(temp_disc)
+    #
+    # metric_results['discriminative'] = np.mean(discriminative_score)
+    #
+    # # 2. Predictive score
+    # predictive_score = list()
+    # for tt in range(args.metric_iteration):
+    #     temp_pred = predictive_score_metrics(ori_data, generated_data)
+    #     predictive_score.append(temp_pred)
+    #
+    # metric_results['predictive'] = np.mean(predictive_score)
 
     # 3. Visualization (PCA and tSNE)
     visualization(ori_data, generated_data, 'pca', args.data_name, labels)
     visualization(ori_data, generated_data, 'tsne', args.data_name)
 
     ## Print discriminative and predictive scores
-    print(metric_results)
+    # print(metric_results)
 
     return ori_data, generated_data, metric_results
 

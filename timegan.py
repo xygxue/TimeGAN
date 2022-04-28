@@ -91,8 +91,8 @@ def timegan (ori_data, parameters):
   ## Build a RNN networks
     
   # Input place holders
-  X = Input(shape=[seq_len, dim], name='RealData')
-  Z = Input(shape=[seq_len, dim], name='RandomData')
+  X = Input(shape=[seq_len, dim], batch_size=batch_size, name='RealData')
+  Z = Input(shape=[seq_len, dim], batch_size=batch_size, name='RandomData')
 
   # T = tf.placeholder(tf.int32, [None], name = "myinput_t")
 
@@ -110,7 +110,6 @@ def timegan (ori_data, parameters):
                       hidden_units=hidden_dim,
                       output_units=hidden_dim,
                       name='Embedder')
-      
 
   # Recovery network from latent space to original space.
   recovery = make_rnn(n_layers=num_layers,
@@ -137,7 +136,7 @@ def timegan (ori_data, parameters):
       
   # Generate next sequence using the previous sequence.
 
-  supervisor = make_rnn(n_layers=num_layers,
+  supervisor = make_rnn(n_layers=2,
                         hidden_units=hidden_dim,
                         output_units=hidden_dim,
                         name='Supervisor')
@@ -161,7 +160,7 @@ def timegan (ori_data, parameters):
   autoencoder = Model(inputs=X,
                       outputs=X_tilde,
                       name='Autoencoder')
-  autoencoder.summary()
+  # autoencoder.summary()
   # plot_model(autoencoder,
   #            to_file='model/autoencoder.png',
   #            show_shapes=True)
@@ -175,7 +174,7 @@ def timegan (ori_data, parameters):
   adversarial_supervised = Model(inputs=Z,
                                  outputs=Y_fake,
                                  name='AdversarialNetSupervised')
-  adversarial_supervised.summary()
+  # adversarial_supervised.summary()
   # plot_model(adversarial_supervised, to_file='model/adversarial_supervised.png', show_shapes=True)
 
   # Adversarial Architecture in Latent Space
@@ -184,7 +183,7 @@ def timegan (ori_data, parameters):
   adversarial_emb = Model(inputs=Z,
                           outputs=Y_fake_e,
                           name='AdversarialNet')
-  adversarial_emb.summary()
+  # adversarial_emb.summary()
 
   # plot_model(adversarial_emb, to_file='model/adversarial_emb.png', show_shapes=True)
 
@@ -194,7 +193,7 @@ def timegan (ori_data, parameters):
   synthetic_data = Model(inputs=Z,
                          outputs=X_hat,
                          name='SyntheticData')
-  synthetic_data.summary()
+  # synthetic_data.summary()
   # plot_model(synthetic_data, to_file='model/synthetic_data.png', show_shapes=True)
 
   # Discriminator
@@ -203,7 +202,7 @@ def timegan (ori_data, parameters):
   discriminator_model = Model(inputs=X,
                               outputs=Y_real,
                               name='DiscriminatorReal')
-  discriminator_model.summary()
+  # discriminator_model.summary()
   # plot_model(discriminator_model, to_file='model/discriminator_model.png',show_shapes=True)
 
     
@@ -262,9 +261,10 @@ def timegan (ori_data, parameters):
       h_hat_supervised = supervisor(h)
       g_loss_s = mse(h[:, 1:, :], h_hat_supervised[:, :-1, :])
 
-    var_list = supervisor.trainable_variables
+    var_list = supervisor.trainable_variables + generator.trainable_variables
     gradients = tape.gradient(g_loss_s, var_list)
-    supervisor_optimizer.apply_gradients(zip(gradients, var_list))
+    apply_grads = [(grad, var) for (grad, var) in zip(gradients, var_list) if grad is not None]
+    supervisor_optimizer.apply_gradients(apply_grads)
     return g_loss_s
 
   # Training Loop
@@ -292,7 +292,7 @@ def timegan (ori_data, parameters):
                                           y_pred=y_fake_e)
       h = embedder(x)
       h_hat_supervised = supervisor(h)
-      generator_loss_supervised = mse(h[:, 1:, :], h_hat_supervised[:, 1:, :])
+      generator_loss_supervised = mse(h[:, 1:, :], h_hat_supervised[:, -1:, :])
 
       x_hat = synthetic_data(z)
       generator_moment_loss = get_generator_moment_loss(x, x_hat)
