@@ -246,7 +246,7 @@ def timegan (ori_data, parameters):
     return tf.sqrt(embedding_loss_t0), gradients
 
   autoencoder_grad = []
-  for step in tqdm(range(90000)):
+  for step in tqdm(range(55000)):
     X_ = next(real_series_iter)
     step_e_loss_t0, emb_grad = train_autoencoder_init(X_)
     autoencoder_grad.append(emb_grad)
@@ -274,7 +274,7 @@ def timegan (ori_data, parameters):
 
   # Training Loop
   supervised_grad = []
-  for step in tqdm(range(90000)):
+  for step in tqdm(range(55000)):
     X_ = next(real_series_iter)
     step_g_loss_s, sup_grad = train_supervisor(X_)
     supervised_grad.append(sup_grad)
@@ -370,7 +370,7 @@ def timegan (ori_data, parameters):
   joint_emb_grad = []
   discriminator_grad = []
 
-  for step in tqdm(range(60000)):
+  for step in tqdm(range(35000)):
     # Train generator (twice as often as discriminator)
     for kk in range(3):
       X_ = next(real_series_iter)
