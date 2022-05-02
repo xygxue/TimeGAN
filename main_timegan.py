@@ -36,6 +36,8 @@ from pathlib import Path
 import numpy as np
 import warnings
 
+from utils import save_to_csv, save_to_json
+
 warnings.filterwarnings("ignore")
 
 # 1. TimeGAN model
@@ -45,12 +47,14 @@ from data_loading import real_data_loading, sine_data_generation
 # 3. Metrics
 from metrics.discriminative_metrics import discriminative_score_metrics
 from metrics.predictive_metrics import predictive_score_metrics
-from metrics.visualization_metrics import visualization, fake_real_plot
+from metrics.visualization_metrics import visualization, fake_real_dist_plot, ts_real_fake_plot
 
 dataset = "czb"
 real_path = os.path.join(Path(__file__).parent, 'data', dataset, 'timegan_real_{cur_date}.csv')
 fake_path = os.path.join(Path(__file__).parent, 'data', dataset, 'timegan_fake_{cur_date}.csv')
 result_path = os.path.join(Path(__file__).parent, 'results', dataset, 'numeric', '{cur_date}.json')
+dist_path = os.path.join(Path(__file__).parent, 'results', dataset, 'dist')
+ts_path = os.path.join(Path(__file__).parent, 'results', dataset, 'ts')
 
 
 def main(args, cur_date):
@@ -71,14 +75,16 @@ def main(args, cur_date):
     - generated_data: generated synthetic data
     - metric_results: discriminative and predictive scores
   """
+    acc_id = "A0000009265"
     # Data loading
-    if args.data_name in ['stock', 'energy', 'czb']:
+    if args.data_name in ['stock', 'energy']:
         ori_data, labels, scaler = real_data_loading(args.data_name, args.seq_len)
     elif args.data_name == 'sine':
         # Set number of samples and its dimensions
         no, dim = 10000, 5
         ori_data = sine_data_generation(no, args.seq_len, dim)
-
+    if args.data_name == 'czb':
+        ori_data, labels, scaler = real_data_loading(args.data_name, args.seq_len, acc_id)
     print(args.data_name + ' dataset is ready.')
 
     # Synthetic data generation by TimeGAN
@@ -92,35 +98,39 @@ def main(args, cur_date):
     parameters['data_name'] = args.data_name
     parameters['cur_date'] = cur_date
     parameters['scaler'] = scaler
+    parameters['acc_id'] = acc_id
 
     generated_data = timegan(ori_data, parameters)
     print('Finish Synthetic Data Generation')
 
     ## Performance metrics
+
     # Output initialization
     metric_results = dict()
 
-    # # 1. Discriminative Score
-    # discriminative_score = list()
-    # for _ in range(args.metric_iteration):
-    #     temp_disc = discriminative_score_metrics(ori_data, generated_data)
-    #     discriminative_score.append(temp_disc)
-    #
-    # metric_results['discriminative'] = np.mean(discriminative_score)
-    #
-    # # 2. Predictive score
-    # predictive_score = list()
-    # for tt in range(args.metric_iteration):
-    #     temp_pred = predictive_score_metrics(ori_data, generated_data)
-    #     predictive_score.append(temp_pred)
-    #
+    # 1. Visualization (PCA and tSNE)
+    # visualization(ori_data, generated_data, 'pca', args.data_name)
+    # visualization(ori_data, generated_data, 'tsne', args.data_name)
+    # fake_real_dist_plot(ori_data, generated_data, dist_path.format(cur_date=cur_date), cur_date, labels)
+    ts_real_fake_plot(ori_data, generated_data, ts_path.format(cur_date=cur_date), acc_id, labels, cur_date)
+
+    # 2. Discriminative Score
+    discriminative_score = list()
+    for _ in range(args.metric_iteration):
+        temp_disc = discriminative_score_metrics(ori_data, generated_data, parameters['data_name'])
+        discriminative_score.append(temp_disc)
+
+    metric_results['discriminative'] = np.mean(discriminative_score)
+
+    # 3. Predictive score
+    predictive_score = list()
+    for tt in range(args.metric_iteration):
+        predictive_score_metrics(ori_data, generated_data, parameters['data_name'])
+
     # metric_results['predictive'] = np.mean(predictive_score)
 
-    # 3. Visualization (PCA and tSNE)
-    visualization(ori_data, generated_data, 'pca', args.data_name, labels)
-    visualization(ori_data, generated_data, 'tsne', args.data_name)
 
-    ## Print discriminative and predictive scores
+    # Print discriminative and predictive scores
     # print(metric_results)
 
     return ori_data, generated_data, metric_results
@@ -147,7 +157,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--hidden_dim',
         help='hidden state dimensions (should be optimized)',
-        default=12,
+        default=36,
         type=int)
     parser.add_argument(
         '--num_layer',
@@ -167,7 +177,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--metric_iteration',
         help='iterations of the metric computation',
-        default=10,
+        default=1,
         type=int)
 
     args = parser.parse_args()
@@ -178,12 +188,6 @@ if __name__ == '__main__':
     # Calls main function
     ori_data, generated_data, metrics = main(args, cur_date)
 
-    with open(real_path.format(cur_date=cur_date), 'w') as f:
-        write = csv.writer(f)
-        write.writerow(ori_data)
-    with open(fake_path.format(cur_date=cur_date), 'w') as f_fake:
-        # using csv.writer method from CSV package
-        write_fake = csv.writer(f_fake)
-        write_fake.writerow(generated_data)
-    with open(result_path.format(cur_date=cur_date), "w") as file:
-        json.dump(metrics, file, indent=4)
+    save_to_csv(real_path, ori_data, cur_date)
+    save_to_csv(fake_path, generated_data, cur_date)
+    save_to_json(result_path, metrics, cur_date)

@@ -18,120 +18,95 @@ Note: Use post-hoc RNN to classify original data and synthetic data
 Output: discriminative score (np.abs(classification accuracy - 0.5))
 """
 
-# Necessary Packages
-import tensorflow as tf
+import os
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
-from tensorflow.keras import Input, Sequential
+import pandas as pd
+from tensorflow.keras.metrics import AUC
+from matplotlib import pyplot as plt
+from matplotlib.ticker import FuncFormatter
+from tensorflow.keras import Sequential
 from tensorflow.keras.layers import GRU, Dense
-from sklearn.metrics import accuracy_score
-from utils import train_test_divide, extract_time, batch_generator
 
 
-def discriminative_score_metrics (ori_data, generated_data):
-  """Use post-hoc RNN to classify original data and synthetic data
+def ts_classification_training_plot(history, dataset):
+    plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'discriminative_metrics', '{cur_date}.png')
+    now = datetime.now()
+    cur_date = now.strftime("%Y-%m-%d-%H")
+
+    fig, axes = plt.subplots(ncols=2, figsize=(14, 4))
+    history[['AUC', 'val_AUC']].rename(columns={'AUC': 'Train', 'val_AUC': 'Test'}).plot(ax=axes[1],
+                                                                                         title='ROC Area under the Curve',
+                                                                                         style=['-', '--'],
+                                                                                         xlim=(0, 250))
+    history[['accuracy', 'val_accuracy']].rename(columns={'accuracy': 'Train', 'val_accuracy': 'Test'}).plot(ax=axes[0],
+                                                                                                             title='Accuracy',
+                                                                                                             style=['-',
+                                                                                                                    '--'],
+                                                                                                             xlim=(
+                                                                                                             0, 250))
+    for i in [0, 1]:
+        axes[i].set_xlabel('Epoch')
+
+    axes[0].yaxis.set_major_formatter(FuncFormatter(lambda y, _: '{:.0%}'.format(y)))
+    axes[0].set_ylabel('Accuracy (%)')
+    axes[1].set_ylabel('AUC')
+    fig.suptitle('Assessing Fidelity: Time Series Classification Performance', fontsize=14)
+    fig.tight_layout()
+    fig.subplots_adjust(top=.85)
+    plt.savefig(plot_path.format(cur_date=cur_date))
+
+
+def discriminative_score_metrics(ori_data, generated_data, dataname):
+    """Use post-hoc RNN to classify original data and synthetic data
   
-  Args:
-    - ori_data: original data
-    - generated_data: generated synthetic data
-    
-  Returns:
-    - discriminative_score: np.abs(classification accuracy - 0.5)
-  """
-  # Initialization on the Graph
-  tf.compat.v1.reset_default_graph()
-
-  # Basic Parameters
-  no, seq_len, dim = np.asarray(ori_data).shape    
-    
-  # Set maximum sequence length and each sequence length
-  ori_time, ori_max_seq_len = extract_time(ori_data)
-  generated_time, generated_max_seq_len = extract_time(ori_data)
-  max_seq_len = max([ori_max_seq_len, generated_max_seq_len])  
-     
-  ## Builde a post-hoc RNN discriminator network 
-  # Network parameters
-  hidden_dim = int(dim/2)
-  iterations = 2000
-  batch_size = 128
-    
-  # Input place holders
-  # Feature
-  X = Input(shape=[seq_len, dim], name='RealData')
-  X_hat = Input(shape=[seq_len, dim], name='FakeData')
-    
-  T = tf.placeholder(tf.int32, [None], name = "myinput_t")
-  T_hat = tf.placeholder(tf.int32, [None], name = "myinput_t_hat")
-    
-  # discriminator function
-  def discriminator (x, t):
-    """Simple discriminator function.
-    
     Args:
-      - x: time-series data
-      - t: time information
-      
-    Returns:
-      - y_hat_logit: logits of the discriminator output
-      - y_hat: discriminator output
-      - d_vars: discriminator variables
-    """
-    with tf.variable_scope("discriminator", reuse = tf.AUTO_REUSE) as vs:
-      d_cell = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim, activation=tf.nn.tanh, name = 'd_cell')
-      d_outputs, d_last_states = tf.nn.dynamic_rnn(d_cell, x, dtype=tf.float32, sequence_length = t)
-      y_hat_logit = tf.contrib.layers.fully_connected(d_last_states, 1, activation_fn=None) 
-      y_hat = tf.nn.sigmoid(y_hat_logit)
-      d_vars = [v for v in tf.all_variables() if v.name.startswith(vs.name)]
+      - ori_data: original data
+      - generated_data: generated synthetic data
 
-    discriminator = Sequential([GRU(units=hidden_dim,
-                    return_sequences=True,
-                    name='GRU_1')] +
-               [Dense(units=1,
-                      activation='sigmoid',
-                      name='OUT')], name='Discriminator')
-    return y_hat_logit, y_hat, d_vars
-    
-  y_logit_real, y_pred_real, d_vars = discriminator(X, T)
-  y_logit_fake, y_pred_fake, _ = discriminator(X_hat, T_hat)
-        
-  # Loss for the discriminator
-  d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits = y_logit_real, 
-                                                                       labels = tf.ones_like(y_logit_real)))
-  d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits = y_logit_fake, 
-                                                                       labels = tf.zeros_like(y_logit_fake)))
-  d_loss = d_loss_real + d_loss_fake
-    
-  # optimizer
-  d_solver = tf.train.AdamOptimizer().minimize(d_loss, var_list = d_vars)
-        
-  ## Train the discriminator   
-  # Start session and initialize
-  sess = tf.Session()
-  sess.run(tf.global_variables_initializer())
-    
-  # Train/test division for both original and generated data
-  train_x, train_x_hat, test_x, test_x_hat, train_t, train_t_hat, test_t, test_t_hat = \
-  train_test_divide(ori_data, generated_data, ori_time, generated_time)
-    
-  # Training step
-  for itt in range(iterations):
-          
-    # Batch setting
-    X_mb, T_mb = batch_generator(train_x, train_t, batch_size)
-    X_hat_mb, T_hat_mb = batch_generator(train_x_hat, train_t_hat, batch_size)
-          
-    # Train discriminator
-    _, step_d_loss = sess.run([d_solver, d_loss], 
-                              feed_dict={X: X_mb, T: T_mb, X_hat: X_hat_mb, T_hat: T_hat_mb})            
-    
-  ## Test the performance on the testing set    
-  y_pred_real_curr, y_pred_fake_curr = sess.run([y_pred_real, y_pred_fake], 
-                                                feed_dict={X: test_x, T: test_t, X_hat: test_x_hat, T_hat: test_t_hat})
-    
-  y_pred_final = np.squeeze(np.concatenate((y_pred_real_curr, y_pred_fake_curr), axis = 0))
-  y_label_final = np.concatenate((np.ones([len(y_pred_real_curr),]), np.zeros([len(y_pred_fake_curr),])), axis = 0)
-    
-  # Compute the accuracy
-  acc = accuracy_score(y_label_final, (y_pred_final>0.5))
-  discriminative_score = np.abs(0.5-acc)
-    
-  return discriminative_score  
+    Returns:
+      - discriminative_score: np.abs(classification accuracy - 0.5)
+    """
+    ori_data = np.asarray(ori_data)
+    generated_data = np.asarray(generated_data)
+
+    # Basic Parameters
+    n_series, seq_len, dim = ori_data.shape
+
+    # Train test split
+    idx = np.arange(n_series)
+    n_train = int(.8 * n_series)
+    train_idx = idx[:n_train]
+    test_idx = idx[n_train:]
+    train_data = np.vstack((ori_data[train_idx],
+                            generated_data[train_idx]))
+    test_data = np.vstack((ori_data[test_idx],
+                           generated_data[test_idx]))
+    n_train, n_test = len(train_idx), len(test_idx)
+
+    # Classification labels
+    train_labels = np.concatenate((np.ones(n_train),
+                                   np.zeros(n_train)))
+    test_labels = np.concatenate((np.ones(n_test),
+                                  np.zeros(n_test)))
+
+    # Build a post-hoc RNN discriminator network
+    # discriminator/classifier function
+    ts_classifier = Sequential([GRU(36, input_shape=(24, dim), name='GRU'),
+                                Dense(1, activation='sigmoid', name='OUT')],
+                               name='Time_Series_Classifier')
+    ts_classifier.compile(loss='binary_crossentropy',
+                          optimizer='adam',
+                          metrics=[AUC(name='AUC'), 'accuracy'])
+    result = ts_classifier.fit(x=train_data,
+                               y=train_labels,
+                               validation_data=(test_data, test_labels),
+                               epochs=250,
+                               batch_size=36,
+                               verbose=0)
+    history = pd.DataFrame(result.history)
+    discriminative_score = ts_classifier.evaluate(x=test_data, y=test_labels)
+    ts_classification_training_plot(history, dataname)
+    return discriminative_score

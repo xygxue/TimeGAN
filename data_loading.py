@@ -65,7 +65,7 @@ def sine_data_generation (no, seq_len, dim):
   return data
     
 
-def  real_data_loading (data_name, seq_len):
+def real_data_loading(data_name, seq_len, acc_id=None):
   """Load and preprocess real-world datasets.
   
   Args:
@@ -86,7 +86,7 @@ def  real_data_loading (data_name, seq_len):
     # Flip the data to make chronological data
     ori_data = ori_data[::-1]
   elif data_name == 'czb':
-    ori_data, labels = get_cz_bank_data(acc_id='A0000009265')
+    ori_data, labels = get_cz_bank_data(acc_id=acc_id)
 
   # Normalize the data
   scaler = MinMaxScaler()
@@ -94,7 +94,7 @@ def  real_data_loading (data_name, seq_len):
     
   # Preprocess the dataset
   temp_data = []    
-  # Cut data by sequence length
+  # Create rolling window sequences, cut by sequences
   for i in range(len(ori_data) - seq_len):
     _x = ori_data[i:i + seq_len]
     temp_data.append(_x)

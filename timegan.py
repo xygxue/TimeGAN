@@ -22,16 +22,15 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.layers import LayerNormalization, BatchNormalization
 from tensorflow.keras.layers import GRU, Dense, Input, Dropout, LSTM
 from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.utils import plot_model
-from importlib import reload
-
 from tqdm import tqdm
+from see_rnn import get_gradients, features_1D, features_2D
 
-from metrics.visualization_metrics import loss_plot
+from utils import grad_plot
 
 
 def timegan (ori_data, parameters):
@@ -56,6 +55,8 @@ def timegan (ori_data, parameters):
   iterations = parameters['iterations']
   batch_size = parameters['batch_size']
   scaler = parameters['scaler']
+  dataset = parameters['data_name']
+  acc_id = parameters['acc_id']
   gamma = 1
 
   # Device check
@@ -124,12 +125,14 @@ def timegan (ori_data, parameters):
   #                      name='Generator')
   generator = Sequential([GRU(units=hidden_dim,
                                return_sequences=True,
-                               name=f'LSTM_{i + 1}') for i in range(num_layers)] +
+                               name=f'LSTM_{i + 1}') for i in range(6)] +
                          [Dropout(.2)] +
+                         [LayerNormalization()] +
                          [LSTM(units=hidden_dim,
                                return_sequences=True,
                                name=f'GRU_{i + 1}') for i in range(num_layers+3)] +
                          [Dropout(.2)] +
+                         [LayerNormalization()] +
                          [Dense(units=hidden_dim,
                                 activation='tanh',
                                 name='OUT')], name='Generator')
@@ -240,16 +243,18 @@ def timegan (ori_data, parameters):
     var_list = embedder.trainable_variables + recovery.trainable_variables
     gradients = tape.gradient(e_loss_0, var_list)
     autoencoder_optimizer.apply_gradients(zip(gradients, var_list))
-    return tf.sqrt(embedding_loss_t0)
+    return tf.sqrt(embedding_loss_t0), gradients
 
-  for step in tqdm(range(55000)):
+  autoencoder_grad = []
+  for step in tqdm(range(90000)):
     X_ = next(real_series_iter)
-    step_e_loss_t0 = train_autoencoder_init(X_)
+    step_e_loss_t0, emb_grad = train_autoencoder_init(X_)
+    autoencoder_grad.append(emb_grad)
     with writer.as_default():
       tf.summary.scalar('Loss Autoencoder Init', step_e_loss_t0, step=step)
       
   print('Finish Embedding Network Training')
-    
+
   # 2. Training only with supervised loss
   print('Start Training with Supervised Loss Only')
 
@@ -265,15 +270,16 @@ def timegan (ori_data, parameters):
     gradients = tape.gradient(g_loss_s, var_list)
     apply_grads = [(grad, var) for (grad, var) in zip(gradients, var_list) if grad is not None]
     supervisor_optimizer.apply_gradients(apply_grads)
-    return g_loss_s
+    return g_loss_s, gradients
 
   # Training Loop
-  for step in tqdm(range(55000)):
+  supervised_grad = []
+  for step in tqdm(range(90000)):
     X_ = next(real_series_iter)
-    step_g_loss_s = train_supervisor(X_)
+    step_g_loss_s, sup_grad = train_supervisor(X_)
+    supervised_grad.append(sup_grad)
     with writer.as_default():
       tf.summary.scalar('Loss Generator Supervised Init', step_g_loss_s, step=step)
-      
   print('Finish Training with Supervised Loss Only')
     
   # 3. Joint Training
@@ -305,7 +311,7 @@ def timegan (ori_data, parameters):
     var_list = generator.trainable_variables + supervisor.trainable_variables
     gradients = tape.gradient(generator_loss, var_list)
     generator_optimizer.apply_gradients(zip(gradients, var_list))
-    return generator_loss_unsupervised, generator_loss_supervised, generator_moment_loss
+    return generator_loss_unsupervised, generator_loss_supervised, generator_moment_loss, gradients
 
   # Embedding Train Step
   @tf.function
@@ -322,7 +328,7 @@ def timegan (ori_data, parameters):
     var_list = embedder.trainable_variables + recovery.trainable_variables
     gradients = tape.gradient(e_loss, var_list)
     embedding_optimizer.apply_gradients(zip(gradients, var_list))
-    return tf.sqrt(embedding_loss_t0)
+    return tf.sqrt(embedding_loss_t0), gradients
 
   # Discriminator Train Step
   @tf.function
@@ -350,7 +356,7 @@ def timegan (ori_data, parameters):
     var_list = discriminator.trainable_variables
     gradients = tape.gradient(discriminator_loss, var_list)
     discriminator_optimizer.apply_gradients(zip(gradients, var_list))
-    return discriminator_loss
+    return discriminator_loss, gradients
 
   # Training Loop
   d_loss = []
@@ -360,16 +366,24 @@ def timegan (ori_data, parameters):
   e_loss_t0 = []
   step_g_loss_u = step_g_loss_s = step_g_loss_v = step_e_loss_t0 = step_d_loss = 0
 
-  for step in range(40000):
+  generator_grad = []
+  joint_emb_grad = []
+  discriminator_grad = []
+
+  for step in tqdm(range(60000)):
     # Train generator (twice as often as discriminator)
-    for kk in range(2):
+    for kk in range(3):
       X_ = next(real_series_iter)
       Z_ = next(random_series)
 
       # Train generator
-      step_g_loss_u, step_g_loss_s, step_g_loss_v = train_generator(X_, Z_)
+      step_g_loss_u, step_g_loss_s, step_g_loss_v, gen_grad = train_generator(X_, Z_)
+      generator_grad.append(gen_grad)
+
       # Train embedder
-      step_e_loss_t0 = train_embedder(X_)
+      step_e_loss_t0, emb_grad = train_embedder(X_)
+      joint_emb_grad.append(emb_grad)
+
       g_loss_u.append(step_g_loss_u)
       g_loss_s.append(step_g_loss_s)
       g_loss_v.append(step_g_loss_v)
@@ -378,8 +392,9 @@ def timegan (ori_data, parameters):
     X_ = next(real_series_iter)
     Z_ = next(random_series)
     step_d_loss = get_discriminator_loss(X_, Z_)
-    if step_d_loss > 0.15:
-      step_d_loss = train_discriminator(X_, Z_)
+    if step_d_loss > 0.2:
+      step_d_loss, disc_grad = train_discriminator(X_, Z_)
+      discriminator_grad.append(disc_grad)
       d_loss.append(step_d_loss)
 
     if step % 1000 == 0:
@@ -393,7 +408,7 @@ def timegan (ori_data, parameters):
       tf.summary.scalar('E Loss T0', step_e_loss_t0, step=step)
       tf.summary.scalar('D Loss', step_d_loss, step=step)
 
-  loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'])
+  # loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'], cur_date)
   print('Finish Joint Training')
 
   # Persist Synthetic Data Generator

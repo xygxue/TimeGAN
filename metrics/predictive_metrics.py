@@ -15,109 +15,94 @@ predictive_metrics.py
 
 Note: Use Post-hoc RNN to predict one-step ahead (last feature)
 """
+import os
+from datetime import datetime
+from pathlib import Path
 
-# Necessary Packages
-import tensorflow as tf
 import numpy as np
-from sklearn.metrics import mean_absolute_error
-from utils import extract_time
+# Necessary Packages
+import pandas as pd
+from tensorflow.keras.optimizers import Adam
+from matplotlib import pyplot as plt
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import GRU, Dense
+from tensorflow.keras.losses import MeanAbsoluteError
 
- 
-def predictive_score_metrics (ori_data, generated_data):
-  """Report the performance of Post-hoc RNN one-step ahead prediction.
-  
-  Args:
+
+def ts_pred_plot(synthetic_result, real_result, dataset):
+    plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'predictive_metrics', '{cur_date}.png')
+    now = datetime.now()
+    cur_date = now.strftime("%Y-%m-%d-%H")
+    fig, axes = plt.subplots(ncols=2, figsize=(14, 4))
+    synthetic_result.plot(ax=axes[0], title='Train on Synthetic, Test on Real', logy=True, xlim=(0, 100))
+    real_result.plot(ax=axes[1], title='Train on Real, Test on Real', logy=True, xlim=(0, 100))
+    for i in [0, 1]:
+        axes[i].set_xlabel('Epoch')
+        axes[i].set_ylabel('Mean Absolute Error (log scale)')
+
+    fig.suptitle('Assessing Usefulness: Time Series Prediction Performance', fontsize=14)
+    fig.tight_layout()
+    fig.subplots_adjust(top=.85)
+    plt.savefig(plot_path.format(cur_date=cur_date))
+
+
+def predictive_score_metrics(ori_data, generated_data, dataname):
+    """Report the performance of Post-hoc RNN one-step ahead prediction.
+
+    Args:
     - ori_data: original data
     - generated_data: generated synthetic data
-    
-  Returns:
-    - predictive_score: MAE of the predictions on the original data
-  """
-  # Initialization on the Graph
-  tf.reset_default_graph()
 
-  # Basic Parameters
-  no, seq_len, dim = np.asarray(ori_data).shape
-    
-  # Set maximum sequence length and each sequence length
-  ori_time, ori_max_seq_len = extract_time(ori_data)
-  generated_time, generated_max_seq_len = extract_time(ori_data)
-  max_seq_len = max([ori_max_seq_len, generated_max_seq_len])  
-     
-  ## Builde a post-hoc RNN predictive network 
-  # Network parameters
-  hidden_dim = int(dim/2)
-  iterations = 5000
-  batch_size = 128
-    
-  # Input place holders
-  X = tf.placeholder(tf.float32, [None, max_seq_len-1, dim-1], name = "myinput_x")
-  T = tf.placeholder(tf.int32, [None], name = "myinput_t")    
-  Y = tf.placeholder(tf.float32, [None, max_seq_len-1, 1], name = "myinput_y")
-    
-  # Predictor function
-  def predictor (x, t):
-    """Simple predictor function.
-    
-    Args:
-      - x: time-series data
-      - t: time information
-      
     Returns:
-      - y_hat: prediction
-      - p_vars: predictor variables
+    - predictive_score: MAE of the predictions on the original data
     """
-    with tf.variable_scope("predictor", reuse = tf.AUTO_REUSE) as vs:
-      p_cell = tf.nn.rnn_cell.GRUCell(num_units=hidden_dim, activation=tf.nn.tanh, name = 'p_cell')
-      p_outputs, p_last_states = tf.nn.dynamic_rnn(p_cell, x, dtype=tf.float32, sequence_length = t)
-      y_hat_logit = tf.contrib.layers.fully_connected(p_outputs, 1, activation_fn=None) 
-      y_hat = tf.nn.sigmoid(y_hat_logit)
-      p_vars = [v for v in tf.all_variables() if v.name.startswith(vs.name)]
-    
-    return y_hat, p_vars
-    
-  y_pred, p_vars = predictor(X, T)
-  # Loss for the predictor
-  p_loss = tf.losses.absolute_difference(Y, y_pred)
-  # optimizer
-  p_solver = tf.train.AdamOptimizer().minimize(p_loss, var_list = p_vars)
-        
-  ## Training    
-  # Session start
-  sess = tf.Session()
-  sess.run(tf.global_variables_initializer())
-    
-  # Training using Synthetic dataset
-  for itt in range(iterations):
-          
-    # Set mini-batch
-    idx = np.random.permutation(len(generated_data))
-    train_idx = idx[:batch_size]     
-            
-    X_mb = list(generated_data[i][:-1,:(dim-1)] for i in train_idx)
-    T_mb = list(generated_time[i]-1 for i in train_idx)
-    Y_mb = list(np.reshape(generated_data[i][1:,(dim-1)],[len(generated_data[i][1:,(dim-1)]),1]) for i in train_idx)        
-          
-    # Train predictor
-    _, step_p_loss = sess.run([p_solver, p_loss], feed_dict={X: X_mb, T: T_mb, Y: Y_mb})        
-    
-  ## Test the trained model on the original data
-  idx = np.random.permutation(len(ori_data))
-  train_idx = idx[:no]
-    
-  X_mb = list(ori_data[i][:-1,:(dim-1)] for i in train_idx)
-  T_mb = list(ori_time[i]-1 for i in train_idx)
-  Y_mb = list(np.reshape(ori_data[i][1:,(dim-1)], [len(ori_data[i][1:,(dim-1)]),1]) for i in train_idx)
-    
-  # Prediction
-  pred_Y_curr = sess.run(y_pred, feed_dict={X: X_mb, T: T_mb})
-    
-  # Compute the performance in terms of MAE
-  MAE_temp = 0
-  for i in range(no):
-    MAE_temp = MAE_temp + mean_absolute_error(Y_mb[i], pred_Y_curr[i,:,:])
-    
-  predictive_score = MAE_temp / no
-    
-  return predictive_score
-    
+    ori_data = np.asarray(ori_data)
+    generated_data = np.asarray(generated_data)
+
+    # Basic Parameters
+    n_series, seq_len, dim = np.asarray(ori_data).shape
+    idx = np.arange(n_series)
+    n_train = int(.8 * n_series)
+    train_idx = idx[:n_train]
+    test_idx = idx[n_train:]
+
+    real_train_data = ori_data[train_idx, :, :dim-1]
+    real_train_label = ori_data[train_idx, :, -1]
+
+    real_test_data = ori_data[test_idx, :, :dim-1]
+    real_test_label = ori_data[test_idx, :, -1]
+
+    synthetic_train = generated_data[:, :, :dim-1]
+    synthetic_label = generated_data[:, :, -1]
+
+    def get_model():
+      model = Sequential([GRU(12, input_shape=(seq_len, dim-1)),
+                          Dense(24)])
+
+      model.compile(optimizer=Adam(),
+                    loss=MeanAbsoluteError(name='MAE'))
+      return model
+
+
+    ts_regression = get_model()
+    synthetic_result = ts_regression.fit(x=synthetic_train,
+                                         y=synthetic_label,
+                                         validation_data=(
+                                           real_test_data,
+                                           real_test_label),
+                                         epochs=100,
+                                         batch_size=36,
+                                         verbose=0)
+    ts_regression = get_model()
+    real_result = ts_regression.fit(x=real_train_data,
+                                    y=real_train_label,
+                                    validation_data=(
+                                      real_test_data,
+                                      real_test_label),
+                                    epochs=100,
+                                    batch_size=36,
+                                    verbose=0)
+    synthetic_result = pd.DataFrame(synthetic_result.history).rename(columns={'loss': 'Train', 'val_loss': 'Test'})
+    real_result = pd.DataFrame(real_result.history).rename(columns={'loss': 'Train', 'val_loss': 'Test'})
+    ts_pred_plot(synthetic_result, real_result, dataname)
+    return synthetic_result, real_result
