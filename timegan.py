@@ -28,7 +28,6 @@ from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
 from tqdm import tqdm
-from see_rnn import get_gradients, features_1D, features_2D
 
 from utils import grad_plot
 
@@ -370,9 +369,9 @@ def timegan (ori_data, parameters):
   joint_emb_grad = []
   discriminator_grad = []
 
-  for step in tqdm(range(35000)):
+  for step in tqdm(range(45000)):
     # Train generator (twice as often as discriminator)
-    for kk in range(3):
+    for kk in range(2):
       X_ = next(real_series_iter)
       Z_ = next(random_series)
 
