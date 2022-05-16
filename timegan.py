@@ -22,13 +22,19 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import LayerNormalization, BatchNormalization
-from tensorflow.keras.layers import GRU, Dense, Input, Dropout, LSTM
-from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
-from tensorflow.keras.models import Sequential, Model
+from keras.layers import LayerNormalization, BatchNormalization
+from keras.layers import GRU, Dense, Input, Dropout, LSTM
+from keras.losses import BinaryCrossentropy, MeanSquaredError
+from keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
+from keras.layers import Input, Dense, Lambda, Layer, Add, Multiply
+from keras import backend as K
 from tqdm import tqdm
 
+from metrics.visualization_metrics import loss_plot
+import tensorflow_probability as tfp
+
+tfd = tfp.distributions
 from utils import grad_plot
 
 
@@ -57,6 +63,7 @@ def timegan (ori_data, parameters):
   dataset = parameters['data_name']
   acc_id = parameters['acc_id']
   gamma = 1
+  intermediate_dim = 4
 
   # Device check
   gpu_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -97,25 +104,58 @@ def timegan (ori_data, parameters):
   # T = tf.placeholder(tf.int32, [None], name = "myinput_t")
 
   def make_rnn(n_layers, hidden_units, output_units, name):
-    return Sequential([LSTM(units=hidden_units,
+    return Sequential(
+                      [GRU(units=hidden_units,
                            return_sequences=True,
                            name=f'GRU_{i + 1}') for i in range(n_layers)] +
                       [Dense(units=output_units,
                              activation='sigmoid',
                              name='OUT')], name=name)
 
+  def nll(y_true, y_pred):
+    """ Negative log likelihood (Bernoulli). """
+    y_pred = tf.cast(y_pred, tf.float32)
+    lh = tfp.distributions.Bernoulli(probs=y_pred)
+
+    return -K.sum(lh.log_prob(y_true), axis=1)
+
   # Embedding network between original feature space to latent space.
 
-  embedder = make_rnn(n_layers=num_layers,
-                      hidden_units=hidden_dim,
-                      output_units=hidden_dim,
-                      name='Embedder')
+  # embedder = make_rnn(n_layers=num_layers,
+  #                     hidden_units=hidden_dim,
+  #                     output_units=hidden_dim,
+  #                     name='Embedder')
+  embedder = Sequential([GRU(units=hidden_dim,
+                             return_sequences=True,
+                             name=f'GRU_{i + 1}') for i in range(num_layers)] +
+                        [Dense(units=hidden_dim,
+                               activation='sigmoid',
+                               name='OUT')], name='Embedder')
 
   # Recovery network from latent space to original space.
-  recovery = make_rnn(n_layers=num_layers,
+  recovery_syn = make_rnn(n_layers=num_layers,
                       hidden_units=hidden_dim,
                       output_units=dim,
                       name='Recovery')
+  recovery = Sequential([Dense(units=34,
+                               activation='relu',
+                               name='IN')] +
+                        [GRU(units=hidden_dim,
+                             return_sequences=True,
+                             name=f'GRU_{i + 1}') for i in range(num_layers)] +
+                        [Dense(units=dim,
+                               activation='sigmoid',
+                               name='OUT')], name='Recovery')
+  # recovery = Sequential([GRU(units=hidden_dim,
+  #                 return_sequences=True,
+  #                 name=f'GRU_{i + 1}') for i in range(num_layers)] +
+  #                        [Dense(units=dim,
+  #                               activation='sigmoid',
+  #                               name='OUT')] +
+  #                        [tfp.layers.DistributionLambda(
+  #                          lambda t: tfp.distributions.Normal(loc=t[..., 0],
+  #                                               scale=0.01*tf.math.softplus(t[..., 1])))],
+  #                       name='Recovery')
 
   # Generator function: Generate time-series data in latent space.
   # generator = make_rnn(n_layers=3,
@@ -124,12 +164,12 @@ def timegan (ori_data, parameters):
   #                      name='Generator')
   generator = Sequential([GRU(units=hidden_dim,
                                return_sequences=True,
-                               name=f'LSTM_{i + 1}') for i in range(6)] +
+                               name=f'LSTM_{i + 1}') for i in range(12)] +
                          [Dropout(.2)] +
                          [LayerNormalization()] +
                          [LSTM(units=hidden_dim,
                                return_sequences=True,
-                               name=f'GRU_{i + 1}') for i in range(num_layers+3)] +
+                               name=f'GRU_{i + 1}') for i in range(num_layers+6)] +
                          [Dropout(.2)] +
                          [LayerNormalization()] +
                          [Dense(units=hidden_dim,
@@ -156,16 +196,29 @@ def timegan (ori_data, parameters):
                                     name='OUT')], name='Discriminator')
 
   # Embedder & Recovery
-  H = embedder(X)
-  X_tilde = recovery(H)
+  # H = embedder(X)
+  # X_tilde = recovery(H)
 
-  autoencoder = Model(inputs=X,
+  H = embedder(X)
+  Z_mu = Dense(34, name='Dense_1')(H)
+  Z_log_var = Dense(34, name='Dense_2')(H)
+
+  Z_mu, Z_log_var = KLDivergenceLayer(name='KLDivergenceLayer')([Z_mu, Z_log_var])
+  Z_sigma = Lambda(lambda t: K.exp(.5*t), name='Lambda')(Z_log_var)
+
+  eps = Input(tensor=tf.random.normal(shape=(batch_size, seq_len, 34)), name='eps_input')
+  Z_eps = Multiply(name='Multiply')([Z_sigma, eps])
+  Z_encoder = Add(name='Add')([Z_mu, Z_eps])
+  X_tilde = recovery(Z_encoder)
+
+  autoencoder = Model(inputs=[X, eps],
                       outputs=X_tilde,
                       name='Autoencoder')
   # autoencoder.summary()
   # plot_model(autoencoder,
   #            to_file='model/autoencoder.png',
   #            show_shapes=True)
+
 
   # Generator
   # Adversarial Architecture - Supervised
@@ -191,7 +244,7 @@ def timegan (ori_data, parameters):
 
   # Mean & Variance Loss
   # Synthetic data
-  X_hat = recovery(H_hat)
+  X_hat = recovery_syn(H_hat)
   synthetic_data = Model(inputs=Z,
                          outputs=X_hat,
                          name='SyntheticData')
@@ -235,18 +288,38 @@ def timegan (ori_data, parameters):
   @tf.function
   def train_autoencoder_init(x):
     with tf.GradientTape() as tape:
-      x_tilde = autoencoder(x)
+      eps_ = tf.random.normal(shape=(batch_size, seq_len, 34))
+      x_tilde = autoencoder([x, eps_])
+
       embedding_loss_t0 = mse(x, x_tilde)
       e_loss_0 = 10 * tf.sqrt(embedding_loss_t0)
+
+      # x_trans = tf.transpose(x, perm=[0, 2, 1])
+      # x_tilde_trans = tf.transpose(x_tilde, perm=[0, 2, 1])
+      # embedding_loss_t0 = mse(x[:, :, 0:1], x_tilde[:, :, 0:1])
+      # embedding_loss_t1 = tf.math.reduce_mean(nll(x_trans[:, 1:3, :], x_tilde_trans[:, 1:3, :]), axis=1)
+      # embedding_loss_t2 = tf.math.reduce_mean(nll(x_trans[:, 3:7, :], x_tilde_trans[:, 3:7, :]), axis=1)
+      # embedding_loss_t3 = tf.math.reduce_mean(nll(x_trans[:, 7:11, :], x_tilde_trans[:, 7:11, :]), axis=1)
+      # embedding_loss_t4 = tf.math.reduce_mean(nll(x_trans[:, 11:13, :], x_tilde_trans[:, 11:13, :]), axis=1)
+      # embedding_loss_t5 = tf.math.reduce_mean(nll(x_trans[:, 13:, :], x_tilde_trans[:, 13:, :]), axis=1)
+      # embedding_loss_ohe = embedding_loss_t1 + embedding_loss_t2 + embedding_loss_t3 + embedding_loss_t4 + embedding_loss_t5
+      # e_loss_0 = 10 * tf.sqrt(embedding_loss_t0) + embedding_loss_ohe
 
     var_list = embedder.trainable_variables + recovery.trainable_variables
     gradients = tape.gradient(e_loss_0, var_list)
     autoencoder_optimizer.apply_gradients(zip(gradients, var_list))
     return tf.sqrt(embedding_loss_t0), gradients
+    # return (tf.sqrt(embedding_loss_t0)+tf.math.reduce_mean(embedding_loss_ohe)), gradients
+
 
   autoencoder_grad = []
-  for step in tqdm(range(55000)):
+  for step in tqdm(range(int(iterations*1.2))):
     X_ = next(real_series_iter)
+    if X_.shape[0] != batch_size:
+      dim_diff = batch_size - X_.shape[0]
+      X_trans_ = tf.transpose(X_, perm=[1, 0, 2])
+      padded = tf.keras.layers.ZeroPadding1D(padding=(0, dim_diff))(X_trans_)
+      X_ = tf.transpose(padded, perm=[1, 0, 2])
     step_e_loss_t0, emb_grad = train_autoencoder_init(X_)
     autoencoder_grad.append(emb_grad)
     with writer.as_default():
@@ -273,7 +346,7 @@ def timegan (ori_data, parameters):
 
   # Training Loop
   supervised_grad = []
-  for step in tqdm(range(55000)):
+  for step in tqdm(range(int(iterations*1.2))):
     X_ = next(real_series_iter)
     step_g_loss_s, sup_grad = train_supervisor(X_)
     supervised_grad.append(sup_grad)
@@ -320,13 +393,27 @@ def timegan (ori_data, parameters):
       h_hat_supervised = supervisor(h)
       generator_loss_supervised = mse(h[:, 1:, :], h_hat_supervised[:, 1:, :])
 
-      x_tilde = autoencoder(x)
+      eps_ = tf.random.normal(shape=(batch_size, seq_len, 34))
+      x_tilde = autoencoder([x, eps_])
       embedding_loss_t0 = mse(x, x_tilde)
       e_loss = 10 * tf.sqrt(embedding_loss_t0) + 0.1 * generator_loss_supervised
+
+      # x_trans = tf.transpose(x, perm=[0, 2, 1])
+      # x_tilde_trans = tf.transpose(x_tilde, perm=[0, 2, 1])
+      #
+      # embedding_loss_t0 = mse(x[:, :, 0:1], x_tilde[:, :, 0:1])
+      # embedding_loss_t1 = nll(x_trans[:, 1:3, :], x_tilde_trans[:, 1:3, :])
+      # embedding_loss_t2 = nll(x_trans[:, 3:7, :], x_tilde_trans[:, 3:7, :])
+      # embedding_loss_t3 = nll(x_trans[:, 7:11, :], x_tilde_trans[:, 7:11, :])
+      # embedding_loss_t4 = nll(x_trans[:, 11:13, :], x_tilde_trans[:, 11:13, :])
+      # embedding_loss_t5 = nll(x_trans[:, 13:, :], x_tilde_trans[:, 13:, :])
+      # embedding_loss_ohe = embedding_loss_t1 + embedding_loss_t2 + embedding_loss_t3 + embedding_loss_t4 + embedding_loss_t5
+      # e_loss = 10 * tf.sqrt(embedding_loss_t0) + embedding_loss_ohe + 0.1 * generator_loss_supervised
 
     var_list = embedder.trainable_variables + recovery.trainable_variables
     gradients = tape.gradient(e_loss, var_list)
     embedding_optimizer.apply_gradients(zip(gradients, var_list))
+    # return (tf.sqrt(embedding_loss_t0)+tf.math.reduce_mean(embedding_loss_ohe)), gradients
     return tf.sqrt(embedding_loss_t0), gradients
 
   # Discriminator Train Step
@@ -369,12 +456,16 @@ def timegan (ori_data, parameters):
   joint_emb_grad = []
   discriminator_grad = []
 
-  for step in tqdm(range(45000)):
+  for step in tqdm(range(iterations)):
     # Train generator (twice as often as discriminator)
     for kk in range(2):
       X_ = next(real_series_iter)
       Z_ = next(random_series)
-
+      if X_.shape[0] != batch_size:
+        dim_diff = batch_size - X_.shape[0]
+        X_trans_ = tf.transpose(X_, perm=[1, 0, 2])
+        padded = tf.keras.layers.ZeroPadding1D(padding=(0, dim_diff))(X_trans_)
+        X_ = tf.transpose(padded, perm=[1, 0, 2])
       # Train generator
       step_g_loss_u, step_g_loss_s, step_g_loss_v, gen_grad = train_generator(X_, Z_)
       generator_grad.append(gen_grad)
@@ -407,7 +498,7 @@ def timegan (ori_data, parameters):
       tf.summary.scalar('E Loss T0', step_e_loss_t0, step=step)
       tf.summary.scalar('D Loss', step_d_loss, step=step)
 
-  # loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'], cur_date)
+  loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, parameters['data_name'], cur_date)
   print('Finish Joint Training')
 
   # Persist Synthetic Data Generator
@@ -426,3 +517,25 @@ def timegan (ori_data, parameters):
   generated_data = (scaler.inverse_transform(generated_data.reshape(-1, dim)).reshape(-1, seq_len, dim))
 
   return generated_data
+
+class KLDivergenceLayer(Layer):
+
+  """ Identity transform layer that adds KL divergence
+  to the final model loss.
+  """
+
+  def __init__(self, *args, **kwargs):
+    self.is_placeholder = True
+    super(KLDivergenceLayer, self).__init__(*args, **kwargs)
+
+  def call(self, inputs):
+
+    mu, log_var = inputs
+
+    kl_batch = - .5 * K.sum(1 + log_var -
+                            K.square(mu) -
+                            K.exp(log_var), axis=-1)
+
+    self.add_loss(K.mean(kl_batch), inputs=inputs)
+
+    return inputs

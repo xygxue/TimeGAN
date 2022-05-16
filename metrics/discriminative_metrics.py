@@ -31,10 +31,9 @@ from tensorflow.keras import Sequential
 from tensorflow.keras.layers import GRU, Dense
 
 
-def ts_classification_training_plot(history, dataset):
+def ts_classification_training_plot(history, dataset, cur_date):
     plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'discriminative_metrics', '{cur_date}.png')
-    now = datetime.now()
-    cur_date = now.strftime("%Y-%m-%d-%H")
+
 
     fig, axes = plt.subplots(ncols=2, figsize=(14, 4))
     history[['AUC', 'val_AUC']].rename(columns={'AUC': 'Train', 'val_AUC': 'Test'}).plot(ax=axes[1],
@@ -59,7 +58,7 @@ def ts_classification_training_plot(history, dataset):
     plt.savefig(plot_path.format(cur_date=cur_date))
 
 
-def discriminative_score_metrics(ori_data, generated_data, dataname):
+def discriminative_score_metrics(ori_data, generated_data, dataname, cur_date):
     """Use post-hoc RNN to classify original data and synthetic data
   
     Args:
@@ -108,5 +107,5 @@ def discriminative_score_metrics(ori_data, generated_data, dataname):
                                verbose=0)
     history = pd.DataFrame(result.history)
     discriminative_score = ts_classifier.evaluate(x=test_data, y=test_labels)
-    ts_classification_training_plot(history, dataname)
+    ts_classification_training_plot(history, dataname, cur_date)
     return discriminative_score

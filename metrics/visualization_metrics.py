@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def visualization (ori_data, generated_data, analysis, dataset):
+def visualization (ori_data, generated_data, analysis, dataset, cur_date):
   """Using PCA or tSNE for generated and original data visualization.
 
   Args:
@@ -65,9 +65,6 @@ def visualization (ori_data, generated_data, analysis, dataset):
 
   # Visualization parameter
   colors = ["red" for i in range(anal_sample_no)] + ["blue" for i in range(anal_sample_no)]
-
-  now = datetime.now()
-  cur_date = now.strftime("%Y-%m-%d-%H")
 
   if analysis == 'pca':
     # PCA Analysis
@@ -120,11 +117,11 @@ def loss_plot(d_loss, g_loss_u, g_loss_s, g_loss_v, e_loss_t0, iterations, datas
 
     plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'loss', '{cur_date}.png')
 
-    plt.plot(range(len(d_loss)), d_loss, label="Disriminator Loss")
-    plt.plot(range(len(g_loss_u)), g_loss_u, label="Generator Adversarial Loss")
-    plt.plot(range(len(g_loss_u)), g_loss_s, label="Generator Supervised(Hidden) Loss")
-    plt.plot(range(len(g_loss_u)), g_loss_v, label="Generator Moment Loss")
-    plt.plot(range(len(g_loss_u)), e_loss_t0, label="Embedder Loss")
+    plt.plot(range(len(d_loss)), d_loss, label="Disriminator Loss", alpha=0.3)
+    plt.plot(range(len(g_loss_u)), g_loss_u, label="Generator Adversarial Loss", alpha=0.3)
+    plt.plot(range(len(g_loss_u)), g_loss_s, label="Generator Supervised(Hidden) Loss", alpha=0.3)
+    plt.plot(range(len(g_loss_u)), g_loss_v, label="Generator Moment Loss", alpha=0.3)
+    plt.plot(range(len(g_loss_u)), e_loss_t0, label="Embedder Loss", alpha=0.3)
     plt.legend()
     plt.savefig(plot_path.format(cur_date=cur_date))
     plt.show()

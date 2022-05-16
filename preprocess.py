@@ -23,7 +23,7 @@ def get_cz_bank_data(acc_id, len_search=False):
             if 600 < len(sing_acc) < 900:
                 print(i, len(sing_acc))
     data_raw = df.loc[df['account_id'] == acc_id]
-    data_raw = data_raw.drop(columns=['account_id', 'trans_id', 'balance'])
+    data_raw = data_raw.drop(columns=['account_id', 'trans_id'])
     data_prep = DataPrep(data_raw, categorical=CAT,
                          log=LOG,
                          mixed=MIXED,
@@ -32,5 +32,6 @@ def get_cz_bank_data(acc_id, len_search=False):
                          test_ratio=0.2)
     data_onthot = pd.get_dummies(data_prep.df, columns=CAT, drop_first=True).sort_index()
     df_out = data_onthot.groupby(pd.Grouper(freq='14D')).sum()
+    df_out = df_out[['amount', 'balance']]
     labels = df_out.columns
     return df_out.to_numpy(), labels

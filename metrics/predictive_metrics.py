@@ -29,10 +29,8 @@ from tensorflow.keras.layers import GRU, Dense
 from tensorflow.keras.losses import MeanAbsoluteError
 
 
-def ts_pred_plot(synthetic_result, real_result, dataset):
+def ts_pred_plot(synthetic_result, real_result, dataset, cur_date):
     plot_path = os.path.join(Path(__file__).parents[1], 'results', dataset, 'predictive_metrics', '{cur_date}.png')
-    now = datetime.now()
-    cur_date = now.strftime("%Y-%m-%d-%H")
     fig, axes = plt.subplots(ncols=2, figsize=(14, 4))
     synthetic_result.plot(ax=axes[0], title='Train on Synthetic, Test on Real', logy=True, xlim=(0, 100))
     real_result.plot(ax=axes[1], title='Train on Real, Test on Real', logy=True, xlim=(0, 100))
@@ -46,7 +44,7 @@ def ts_pred_plot(synthetic_result, real_result, dataset):
     plt.savefig(plot_path.format(cur_date=cur_date))
 
 
-def predictive_score_metrics(ori_data, generated_data, dataname):
+def predictive_score_metrics(ori_data, generated_data, dataname, cur_date):
     """Report the performance of Post-hoc RNN one-step ahead prediction.
 
     Args:
@@ -104,5 +102,5 @@ def predictive_score_metrics(ori_data, generated_data, dataname):
                                     verbose=0)
     synthetic_result = pd.DataFrame(synthetic_result.history).rename(columns={'loss': 'Train', 'val_loss': 'Test'})
     real_result = pd.DataFrame(real_result.history).rename(columns={'loss': 'Train', 'val_loss': 'Test'})
-    ts_pred_plot(synthetic_result, real_result, dataname)
+    ts_pred_plot(synthetic_result, real_result, dataname, cur_date)
     return synthetic_result, real_result
